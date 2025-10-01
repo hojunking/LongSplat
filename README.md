@@ -74,10 +74,10 @@ DATAROOT is `./data` by default. Please first make data folder by `mkdir data`.
 
 
 ### Free Dataset
-Download our preprocessed Free dataset from [Dropbox](https://www.dropbox.com/sh/jmfao2c4dp9usji/AAC7Ydj6rrrhy1-VvlAVjyE_a?dl=0), and save it into the `./data/free` folder.
+Download Free dataset from [Dropbox](https://www.dropbox.com/sh/jmfao2c4dp9usji/AAC7Ydj6rrrhy1-VvlAVjyE_a?dl=0), and save it into the `./data/free` folder.
 
 ### Hike Dataset
-Download our preprocessed Hike dataset from [Google Drive](https://drive.google.com/drive/folders/1kGY-VijIbXNsNb7ghEywi1fvkH4BaIEz?usp=share_link), and save it into the `./data/hike` folder.
+Download Hike dataset from [Google Drive](https://drive.google.com/drive/folders/1kGY-VijIbXNsNb7ghEywi1fvkH4BaIEz?usp=share_link), and save it into the `./data/hike` folder.
 
 ### Tanks and Temples
 
@@ -112,9 +112,14 @@ bash scripts/train_tnt.sh
 
 ### Run on your own video
 
-* To run LongSplat on your own video, you need to first convert your video to frames and save them to `./data/$CUSTOM_DATA/images/`
+**Input video suggestions:**
+LongSplat can handle varied resolutions and fps. We suggest subsampling to around 10 fps and resizing longer videos to 512 px width for faster training. For best results, avoid videos with dynamic objects and ensure sufficient camera overlap between frames to avoid non-overlapping sparse input.
+
+* To run LongSplat on your own video, you need first to convert your video to frames and save them to `./data/$CUSTOM_DATA/images/`
 
 * Before running the script, you need to modify the `scene=` parameter in `scripts/train_custom.sh` to point to your custom data directory. For example, change `scene='./data/IMG_4190'` to `scene='./data/YOUR_CUSTOM_DATA'`.
+
+* **Adjust training parameters based on video length and resolution:** For longer videos, you may need to increase the `--post_iter` parameter to ensure sufficient optimization. Consider adjusting this value proportionally to your video length.
 
 * Run the following command:
 ```bash
