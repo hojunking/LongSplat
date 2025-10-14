@@ -100,6 +100,7 @@ def render_nvs(model_path, name, iteration, views, gaussians, pipeline, backgrou
         rendering = render(nvs_view, gaussians, pipeline, background, visible_mask=voxel_visible_mask, retain_grad=False)
         torchvision.utils.save_image(rendering["render"], os.path.join(nvs_path, '{0:05d}'.format(i) + ".png"))
         render_img = torch.clamp(rendering["render"], min=0., max=1.)
+        
         render_img = (render_img.permute(1, 2, 0).detach().cpu().numpy() * 255.).astype(np.uint8)[..., ::-1]
         gt = nvs_view.original_image[0:3, :, :]
         gt = (gt.permute(1, 2, 0).detach().cpu().numpy() * 255.).astype(np.uint8)[..., ::-1]
@@ -157,8 +158,13 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         gt = view.original_image[0:3, :, :]
         name_list.append('{0:05d}'.format(idx))
 
-        torchvision.utils.save_image(rendering["render"], os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
-        torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
+        # torchvision.utils.save_image(rendering["render"], os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
+        # torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
+        # modified
+        image_basename = os.path.splitext(view.image_name)[0]
+        torchvision.utils.save_image(rendering["render"], os.path.join(render_path, image_basename + ".png"))
+        torchvision.utils.save_image(gt, os.path.join(gts_path, image_basename + ".png"))
+
         depth_map = vis_depth(rendering['depth'][0].detach().cpu().numpy())
         np.save(os.path.join(depth_path, view.image_name + '.npy'), rendering['depth'][0].detach().cpu().numpy())
         cv2.imwrite(os.path.join(depth_path, '{0:05d}'.format(idx) + ".png"), depth_map)
@@ -246,8 +252,8 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
                 next_train_idx = len(scene.getTrainCameras()) - 1
             ref_viewpoint = scene.getTrainCameras()[next_train_idx]            
             viewpoint.update_RT(ref_viewpoint.R, ref_viewpoint.T)
-            pose_estimation_test(gaussians, viewpoint, pipeline, background)
-            save_transforms(scene.getTestCameras().copy(), os.path.join(scene.model_path, "cameras_all_test.json"))
+            #pose_estimation_test(gaussians, viewpoint, pipeline, background)
+            #save_transforms(scene.getTestCameras().copy(), os.path.join(scene.model_path, "cameras_all_test.json"))
         with torch.no_grad():
             render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background)
 

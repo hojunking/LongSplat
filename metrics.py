@@ -40,7 +40,36 @@ def readImages(renders_dir, gt_dir):
         image_names.append(fname)
     return renders, gts, image_names
 
-def evaluate(model_paths):
+# NEW: Render(PNG) vs Original GT(JPG) 비교를 위한 새로운 함수
+def readImages_jpg_gt(renders_dir, gt_dir):
+    renders = []
+    gts = []
+    image_names = []
+    for fname in sorted(os.listdir(renders_dir)):
+        if '.ipynb' in fname or not fname.lower().endswith('.png'):
+            continue
+        
+        render_path = renders_dir / fname
+        
+        gt_basename = os.path.splitext(fname)[0]
+        gt_filename = gt_basename + ".jpg"
+        gt_path = gt_dir / gt_filename
+
+        if os.path.exists(gt_path):
+            try:
+                render = Image.open(render_path)
+                gt = Image.open(gt_path)
+                
+                renders.append(tf.to_tensor(render).unsqueeze(0)[:, :3, :, :].cuda())
+                gts.append(tf.to_tensor(gt).unsqueeze(0)[:, :3, :, :].cuda())
+                image_names.append(fname)
+            except Exception as e:
+                print(f"Warning: Could not read image pair ({fname}, {gt_filename}). Error: {e}")
+    return renders, gts, image_names
+
+def evaluate(model_paths, use_qp_logic):
+
+    ORIGINAL_GT_BASE_PATH = "/workdir/dataset/DL3DV10K/compress-x" #GT 참조 scene path
 
     full_dict = {}
     per_view_dict = {}
@@ -61,43 +90,81 @@ def evaluate(model_paths):
             for method in os.listdir(test_dir):
                 print("Method:", method)
 
-                full_dict[scene_dir][method] = {}
-                per_view_dict[scene_dir][method] = {}
-                full_dict_polytopeonly[scene_dir][method] = {}
-                per_view_dict_polytopeonly[scene_dir][method] = {}
-
                 method_dir = test_dir / method
-                gt_dir = method_dir/ "gt"
                 renders_dir = method_dir / "renders"
-                renders, gts, image_names = readImages(renders_dir, gt_dir)
 
-                ssims = []
-                psnrs = []
-                lpipss = []
+                # NEW LOGIC START: QP 모드와 일반 모드를 분기 처리
+                eval_tasks = []
+                if use_qp_logic and "_qp" in scene_dir:
+                    print("INFO: [QP Mode] Dual evaluation started.")
+                    # 1. 원본 GT와 비교하는 태스크 추가
+                    qp_index = scene_dir.find("_qp")
+                    base_scene_name = Path(scene_dir[:qp_index]).name
+                    #original_gt_dir = Path(ORIGINAL_GT_BASE_PATH) / base_scene_name / "color"
+                    original_gt_dir = Path(ORIGINAL_GT_BASE_PATH) / base_scene_name
+                    
+                    eval_tasks.append( (original_gt_dir, "_vs_OrigGT", "jpg_gt") )
+                    
+                    # 2. 압축 GT와 비교하는 태스크 추가
+                    compressed_gt_dir = method_dir / "gt"
+                    eval_tasks.append( (compressed_gt_dir, "_vs_CompGT", "png_gt") )
+                else:
+                    # 3. 일반 모드 (기존 방식) 태스크 추가
+                    print("INFO: [Default Mode] Single evaluation started.")
+                    default_gt_dir = method_dir / "gt"
+                    eval_tasks.append( (default_gt_dir, "", "png_gt") )
 
-                for idx in tqdm(range(len(renders)), desc="Metric evaluation progress"):
-                    ssims.append(ssim(renders[idx], gts[idx]))
-                    psnrs.append(psnr(renders[idx], gts[idx]))
-                    lpipss.append(lpips(renders[idx], gts[idx], net_type='vgg'))
+                for gt_dir, suffix, gt_type in eval_tasks:
+                    method_key = method + suffix
+                    print(f" -> Evaluating with GT: {gt_dir}")
+                    
+                    # method key 초기화
+                    full_dict[scene_dir][method_key] = {}
+                    per_view_dict[scene_dir][method_key] = {}
 
-                print("  SSIM : {:>12.7f}".format(torch.tensor(ssims).mean(), ".5"))
-                print("  PSNR : {:>12.7f}".format(torch.tensor(psnrs).mean(), ".5"))
-                print("  LPIPS: {:>12.7f}".format(torch.tensor(lpipss).mean(), ".5"))
-                print("")
+                    # GT 타입에 따라 적절한 함수를 호출
+                    if gt_type == "jpg_gt":
+                        renders, gts, image_names = readImages(renders_dir, gt_dir)
+                    else: # "png_gt" 또는 기본값
+                        renders, gts, image_names = readImages(renders_dir, gt_dir)
 
-                full_dict[scene_dir][method].update({"SSIM": torch.tensor(ssims).mean().item(),
-                                                        "PSNR": torch.tensor(psnrs).mean().item(),
-                                                        "LPIPS": torch.tensor(lpipss).mean().item()})
-                per_view_dict[scene_dir][method].update({"SSIM": {name: ssim for ssim, name in zip(torch.tensor(ssims).tolist(), image_names)},
-                                                            "PSNR": {name: psnr for psnr, name in zip(torch.tensor(psnrs).tolist(), image_names)},
-                                                            "LPIPS": {name: lp for lp, name in zip(torch.tensor(lpipss).tolist(), image_names)}})
+                    if not renders:
+                        print(" -> No matching images found. Skipping.")
+                        continue
 
-            with open(scene_dir + "/results.json", 'w') as fp:
+                    # 이미지를 불러오지 못했으면 다음 태스크로 넘어감
+                    if not renders:
+                        continue
+
+                    ssims = []
+                    psnrs = []
+                    lpipss = []
+
+                    for idx in tqdm(range(len(renders)), desc="Metric evaluation progress"):
+                        ssims.append(ssim(renders[idx], gts[idx]))
+                        psnrs.append(psnr(renders[idx], gts[idx]))
+                        lpipss.append(lpips(renders[idx], gts[idx], net_type='vgg'))
+
+                    print("  SSIM : {:>12.7f}".format(torch.tensor(ssims).mean()))
+                    print("  PSNR : {:>12.7f}".format(torch.tensor(psnrs).mean()))
+                    print("  LPIPS: {:>12.7f}".format(torch.tensor(lpipss).mean()))
+                    print("")
+
+                    full_dict[scene_dir][method_key].update({"SSIM": torch.tensor(ssims).mean().item(),
+                                                             "PSNR": torch.tensor(psnrs).mean().item(),
+                                                             "LPIPS": torch.tensor(lpipss).mean().item()})
+                    per_view_dict[scene_dir][method_key].update({"SSIM": {name: s.item() for s, name in zip(ssims, image_names)},
+                                                                 "PSNR": {name: p.item() for p, name in zip(psnrs, image_names)},
+                                                                 "LPIPS": {name: l.item() for l, name in zip(lpipss, image_names)}})
+                # NEW LOGIC END
+
+            # JSON 저장 로직은 수정할 필요 없이 그대로 작동합니다.
+            with open(str(Path(scene_dir) / "results.json"), 'w') as fp:
                 json.dump(full_dict[scene_dir], fp, indent=True)
-            with open(scene_dir + "/per_view.json", 'w') as fp:
+            with open(str(Path(scene_dir) / "per_view.json"), 'w') as fp:
                 json.dump(per_view_dict[scene_dir], fp, indent=True)
-        except:
-            print("Unable to compute metrics for model", scene_dir)
+        except Exception as e:
+            print(f"Unable to compute metrics for model {scene_dir}. Error: {e}")
 
 if __name__ == "__main__":
     device = torch.device("cuda:0")
@@ -106,5 +173,7 @@ if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
     parser.add_argument('--model_paths', '-m', required=True, nargs="+", type=str, default=[])
+    parser.add_argument('--qp', action='store_true', 
+                        help="If specified, QP-models are evaluated against both original and compressed GTs.")
     args = parser.parse_args()
-    evaluate(args.model_paths)
+    evaluate(args.model_paths, args.qp)

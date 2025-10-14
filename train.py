@@ -7,7 +7,7 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 
-import os
+import os, json
 import numpy as np
 
 import subprocess
@@ -63,8 +63,31 @@ def reprojection_error(params, points_3d, points_2d, K):
     residuals = points_2d - projected_points_2d # N*1
     return residuals.flatten()
 
+def compute_loss_weight(qp_value, qp_min, qp_max, lower_bound=0.1):
+    if qp_max == qp_min:  # 모든 QP가 같을 때
+        return 1.0
+    # 선형 매핑
+    weight = 1.0 - (qp_value - qp_min) * ((1.0 - lower_bound) / (qp_max - qp_min))
+    return max(lower_bound, min(1.0, weight))  # [lower_bound, 1.0] 범위로 클램프
 
 def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
+    
+    ### Added: QP 기반 가중치 손실 계산을 위한 준비
+    qp_dict, qp_min, qp_max = None, None, None
+    if hasattr(opt, "qp_json") and opt.qp_json and os.path.exists(opt.qp_json):
+        with open(opt.qp_json, "r") as f:
+            qp_dict = json.load(f)
+        qp_values = list(qp_dict.values())
+        qp_min, qp_max = min(qp_values), max(qp_values)
+        print(f"[QP range] min={qp_min}, max={qp_max}")
+        lower_bound = opt.lower_bound if hasattr(opt, "lower_bound") else 0.5
+    else:
+        print("[INFO] No qp.json provided → training without QP-based weighting")
+    
+    
+
+    
+
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.feat_dim, dataset.n_offsets, dataset.voxel_size, dataset.update_depth, dataset.update_init_factor, dataset.update_hierachy_factor, dataset.use_feat_bank, 
                               dataset.appearance_dim, dataset.ratio, dataset.add_opacity_dist, dataset.add_cov_dist, dataset.add_color_dist)
@@ -105,6 +128,15 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras()[0:end_view_id]
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
+
+        # --- QP 기반 weight 계산 (qp.json 있을 때만) ---
+        loss_weight = 1.0
+        if qp_dict is not None:
+            image_name = viewpoint_cam.image_name +'.png'
+            if image_name in qp_dict:
+                qp_value = qp_dict[image_name]
+                loss_weight = compute_loss_weight(qp_value, qp_min, qp_max, lower_bound=lower_bound)
+        loss_weight_tensor = torch.tensor(loss_weight, device="cuda", dtype=torch.float32)
 
         # Render
         if (iteration - 1) == debug_from:
@@ -149,6 +181,8 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                                                view2.view_world_transform.detach(), view1.world_view_transform, view2.intrinsic)
             loss += loss_2d_2 * opt.loss_2d_correspondence_weight
 
+        # --- QP 기반 가중치 손실 적용 ---
+        loss = loss * loss_weight_tensor
         loss.backward()
 
         with torch.no_grad():
@@ -270,7 +304,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                     loss_2d = correspondence_2d_loss(kp0, kp1, conf, rendered_depth, 
                                                     view2.view_world_transform, view1.world_view_transform, view2.intrinsic)
                     loss += loss_2d * opt.loss_2d_correspondence_weight
-
+                
                 loss.backward()
 
                 with torch.no_grad():
@@ -311,6 +345,15 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             
             viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
 
+            # --- QP 기반 weight 계산 (qp.json 있을 때만) ---
+            loss_weight = 1.0
+            if qp_dict is not None:
+                image_name = viewpoint_cam.image_name +'.png'
+                if image_name in qp_dict:
+                    qp_value = qp_dict[image_name]
+                    loss_weight = compute_loss_weight(qp_value, qp_min, qp_max, lower_bound=lower_bound)
+            loss_weight_tensor = torch.tensor(loss_weight, device="cuda", dtype=torch.float32)
+            
             # Render
             if (iteration - 1) == debug_from:
                 pipe.debug = True
@@ -354,7 +397,8 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 loss_2d_2 = correspondence_2d_loss(kp0, kp1, conf, rendered_depth, 
                                                    view2.view_world_transform.detach(), view1.world_view_transform, view2.intrinsic)
                 loss += loss_2d_2 * opt.loss_2d_correspondence_weight
-
+            # --- QP 기반 가중치 손실 적용 ---
+            loss = loss * loss_weight_tensor
             loss.backward()
 
             with torch.no_grad():
@@ -413,6 +457,15 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             
             viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
 
+            # --- QP 기반 weight 계산 (qp.json 있을 때만) ---
+            loss_weight = 1.0
+            if qp_dict is not None:
+                image_name = viewpoint_cam.image_name +'.png'
+                if image_name in qp_dict:
+                    qp_value = qp_dict[image_name]
+                    loss_weight = compute_loss_weight(qp_value, qp_min, qp_max, lower_bound=lower_bound)
+            loss_weight_tensor = torch.tensor(loss_weight, device="cuda", dtype=torch.float32)
+
             # Render
             if (iteration - 1) == debug_from:
                 pipe.debug = True
@@ -457,6 +510,8 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                                                    view2.view_world_transform.detach(), view1.world_view_transform, view2.intrinsic)
                 loss += loss_2d_2 * opt.loss_2d_correspondence_weight
             
+            # --- QP 기반 가중치 손실 적용 ---
+            loss = loss * loss_weight_tensor
             loss.backward()
 
             with torch.no_grad():
@@ -601,6 +656,15 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             viewpoint_stack = scene.getTrainCameras()[0:end_view_id]
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
 
+        # --- QP 기반 weight 계산 (qp.json 있을 때만) ---
+        loss_weight = 1.0
+        if qp_dict is not None:
+            image_name = viewpoint_cam.image_name +'.png'
+            if image_name in qp_dict:
+                qp_value = qp_dict[image_name]
+                loss_weight = compute_loss_weight(qp_value, qp_min, qp_max, lower_bound=lower_bound)
+        loss_weight_tensor = torch.tensor(loss_weight, device="cuda", dtype=torch.float32)
+        
         # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
@@ -646,6 +710,8 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                                                view2.view_world_transform.detach(), view1.world_view_transform, view2.intrinsic)
             loss += loss_2d_2 * opt.loss_2d_correspondence_weight
 
+        # --- QP 기반 가중치 손실 적용 ---
+        loss = loss * loss_weight_tensor
         loss.backward()
 
         with torch.no_grad():

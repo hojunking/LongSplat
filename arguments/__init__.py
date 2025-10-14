@@ -167,6 +167,9 @@ class OptimizationParams(ParamGroup):
         self.window_size = 5
         self.post_iter = 10000
 
+        self.qp_json = ""
+        self.lower_bound = 0.5
+
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

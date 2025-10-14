@@ -16,11 +16,12 @@ ulimit -n 4096
 
 port=$(rand 10000 30000)
 
-scene=("Ballroom" "Barn" "Church" "Family" "Francis" "Horse" "Ignatius" "Museum")
+#scene=("Ballroom", "Barn" "Church" "Family" "Francis" "Horse" "Ignatius" "Museum")
+scene=("Barn" "Church" "Family" "Francis" "Horse" "Ignatius" "Museum")
 
 for scene in "${scene[@]}"; do
     timestamp=$(date "+%Y-%m-%d_%H:%M:%S")
-    python train.py --eval -s "./data/tanks/$scene" -m "outputs/tanks/$scene/baseline/$timestamp" --port $port --mode tanks
+    python train.py --eval -s "./dataset/tanks/$scene" -m "outputs/tanks/$scene/baseline/$timestamp" --port $port --mode tanks
     python render.py -m "outputs/tanks/$scene/baseline/$timestamp"
     python metrics.py -m "outputs/tanks/$scene/baseline/$timestamp"
 done
