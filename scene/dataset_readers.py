@@ -372,7 +372,9 @@ def readEvalSceneInfo(path, model_path, images, eval, llffhold=8):
     return scene_info
 
 
-def readFreeSceneInfo(path, images, eval, llffhold=8):
+# train/test 나눔.
+# def readFreeSceneInfo(path, images, eval, llffhold=8):
+def readFreeSceneInfo(path, images, eval, llffhold=7):
     if os.path.exists(os.path.join(path, "sparse")):
         try:
             cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
@@ -391,12 +393,42 @@ def readFreeSceneInfo(path, images, eval, llffhold=8):
         return None
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
+    # 기존
+    # if eval:
+    #     train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
+    #     test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+    # else:
+    #     train_cam_infos = cam_infos
+    #     test_cam_infos = []
+
+
+    # 수정된 Train/Test Split 
     if eval:
-        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
-        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+        test_indices = set()
+        
+        # llffhold 간격으로 test 프레임 선택
+        for idx in range(0, len(cam_infos), llffhold):
+            # idx가 7과 32의 공배수인지 확인
+            if idx % 32 == 0 and idx % llffhold == 0 and idx != 0:
+                # 공배수면 +1 프레임을 test로
+                if idx + 1 < len(cam_infos):
+                    test_indices.add(idx + 1)
+                    print(f"  🔄 Frame {idx} is LCM → using {idx + 1} instead")
+            else:
+                # 공배수가 아니면 그대로 test로
+                test_indices.add(idx)
+        
+        print(f"📊 llffhold = {llffhold}")
+        print(f"📍 Total test frames: {len(test_indices)}")
+        print(f"📍 Test indices: {sorted(test_indices)[:100]}")  # 처음 20개만 출력
+        
+        # Train/Test 분리
+        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx not in test_indices]
+        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in test_indices]
     else:
         train_cam_infos = cam_infos
         test_cam_infos = []
+    # 수정 끝
 
     nerf_normalization = None
 
@@ -420,6 +452,7 @@ def readFreeSceneInfo(path, images, eval, llffhold=8):
                            ply_path=ply_path)
     return scene_info
 
+# train/test 나눔.
 def readTanksSceneInfo(path, images, eval, llffhold=8):
     if os.path.exists(os.path.join(path, "sparse")):
         try:
@@ -472,6 +505,7 @@ def readTanksSceneInfo(path, images, eval, llffhold=8):
                            ply_path=ply_path)
     return scene_info
 
+# train/test 나눔.
 def readHikeSceneInfo(path, images, eval, llffhold=10):
     reading_dir = "images" if images == None else images
     cam_infos_unsorted = readUnposedCameras2(images_folder=os.path.join(path, reading_dir))
