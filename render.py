@@ -370,83 +370,30 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         if not os.path.exists(dataset.model_path):
             os.makedirs(dataset.model_path)
-        
-    # ---------------- Train set rendering ---------------- #
+
+
     if not skip_train:
         with torch.no_grad():
             render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), 
                        gaussians, pipeline, background, 
                        original_images_path=original_images_path)
-            render_nvs(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), 
-                       gaussians, pipeline, background)
 
-    # ---------------- Test set rendering ---------------- #
+            render_nvs(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background)
     if not skip_test:
-        test_cameras = scene.getTestCameras()
-        train_cameras = scene.getTrainCameras()
-
-        # free dataset 전용 로직
-        if "free" in dataset.model_path:
-            print("🚀 Running test rendering for free dataset")
-
-            llffhold = 7
-            test_indices = set()
-            train_indices = set()
-
-            # Train index: 32의 배수
-            for idx in range(0, len(train_cameras) + len(test_cameras), 32):
-                train_indices.add(idx)
-
-            # Test index: llffhold 간격 + 공배수 offset
-            for idx in range(0, len(train_cameras) + len(test_cameras), llffhold):
-                if idx == 0 or (idx % 32 == 0 and idx % llffhold == 0):
-                    if idx + 1 < len(train_cameras) + len(test_cameras):
-                        test_indices.add(idx + 1)
-                        print(f"  🔄 Frame {idx} (0 or LCM) → test as {idx + 1}")
-                else:
-                    test_indices.add(idx)
-
-            test_indices = sorted(list(test_indices))
-            train_indices = sorted(list(train_indices))
-            print(f"📊 Free dataset split → Train {len(train_indices)}, Test {len(test_indices)}")
-
-            # pose alignment: test ↔ 근접 train frame
-            for i, viewpoint in enumerate(test_cameras):
-                if i >= len(test_indices):
-                    break
-                global_idx = test_indices[i]
-
-                # 가장 가까운 train frame 찾기 (lower bound 방식)
-                nearest_train_idx = max([t for t in train_indices if t <= global_idx], default=0)
-                if nearest_train_idx > len(train_cameras) - 1:
-                    nearest_train_idx = len(train_cameras) - 1
-
-                ref_viewpoint = train_cameras[nearest_train_idx]
-                viewpoint.update_RT(ref_viewpoint.R, ref_viewpoint.T)
-                pose_estimation_test(gaussians, viewpoint, pipeline, background)
-
-        # 기존 dataset들 (Tanks, hike 등)은 그대로 유지
-        else:
-            for idx, viewpoint in enumerate(scene.getTestCameras()):
-                if "hike_dataset" in dataset.model_path:
-                    test_frame_every = 10
-                elif "Tanks" in dataset.model_path:
-                    test_frame_every = 2 if "Family" in dataset.model_path else 8
-                else:
-                    test_frame_every = 8
-
-                next_train_idx = viewpoint.uid * test_frame_every - idx
-                if next_train_idx > len(scene.getTrainCameras()) - 1:
-                    next_train_idx = len(scene.getTrainCameras()) - 1
-
-                ref_viewpoint = scene.getTrainCameras()[next_train_idx]
-                viewpoint.update_RT(ref_viewpoint.R, ref_viewpoint.T)
-                pose_estimation_test(gaussians, viewpoint, pipeline, background)
-
-        # transforms 저장 + test set 렌더링
-        save_transforms(scene.getTestCameras().copy(),
-                        os.path.join(scene.model_path, "cameras_all_test.json"))
-
+        for idx, viewpoint in enumerate(scene.getTestCameras()):
+            if "hike_dataset" in dataset.model_path:
+                test_frame_every = 10
+            elif "Tanks" in dataset.model_path:
+                test_frame_every = 2 if "Family" in dataset.model_path else 8
+            else:
+                test_frame_every = 8
+            next_train_idx = viewpoint.uid * test_frame_every - idx
+            if next_train_idx > len(scene.getTrainCameras()) - 1:
+                next_train_idx = len(scene.getTrainCameras()) - 1
+            ref_viewpoint = scene.getTrainCameras()[next_train_idx]            
+            viewpoint.update_RT(ref_viewpoint.R, ref_viewpoint.T)
+            pose_estimation_test(gaussians, viewpoint, pipeline, background)
+            save_transforms(scene.getTestCameras().copy(), os.path.join(scene.model_path, "cameras_all_test.json"))
         with torch.no_grad():
             render_set(dataset.model_path, "test", scene.loaded_iter,
                     scene.getTestCameras(), gaussians, pipeline, background,
