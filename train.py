@@ -8,7 +8,7 @@
 
 import os
 import numpy as np
-
+import pandas as pd
 import subprocess
 cmd = 'nvidia-smi -q -d Memory |grep -A4 GPU|grep Used'
 result = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE).stdout.decode().split('\n')
@@ -112,7 +112,15 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
     data_type = "compressed" if "comp" in dataset.source_path else "original"
     csv_file = init_loss_csv(dataset.model_path, data_type)
     logger.info(f"📊 Loss log will be saved to: {csv_file}")
+    
+
+
+    # === 프레임 타입 CSV 로드 ===
+    frame_type_path = "./comp_log/x265_3dgs-dataset__free_dataset__free_dataset__grass__images_qp37.csv"
+    frame_info_df = pd.read_csv(frame_type_path)
+
     # ===== 초기화 끝 =====
+
 
     gaussians = GaussianModel(dataset.feat_dim, dataset.n_offsets, dataset.voxel_size, dataset.update_depth, dataset.update_init_factor, dataset.update_hierachy_factor, dataset.use_feat_bank, 
                               dataset.appearance_dim, dataset.ratio, dataset.add_opacity_dist, dataset.add_cov_dist, dataset.add_color_dist)
@@ -383,7 +391,47 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 if densify_mask.sum() > 0:
                     depth_ref =viewpoint_cam.depth_map.cuda()
                     gaussians.densify_occlusion(viewpoint_cam, depth_ref, densify_mask)
-        
+
+
+                    # === [추가] 프레임별 Gaussian 통계 출력 ===
+                    with torch.no_grad():
+                        num_gaussians = gaussians.get_anchor.shape[0]
+                        scales = gaussians.get_scaling
+                        mean_scale = scales.mean().item()
+                        min_scale = scales.min().item()
+                        max_scale = scales.max().item()
+                        small_scale_ratio = (scales < 0.01).float().mean().item()
+
+                        # 프레임 타입 가져오기 (CSV에서 Type 열 사용)
+                        frame_type = frame_info_df.loc[end_view_id - 1, " Type"] if end_view_id - 1 < len(frame_info_df) else "NA"
+
+                        print(f"\n[Frame {end_view_id-1} | {frame_type}-frame] Gaussian Stats")
+                        print(f"  Total Gaussians   : {num_gaussians}")
+                        print(f"  Mean scale        : {mean_scale:.6f}")
+                        print(f"  Min / Max scale   : {min_scale:.6f} / {max_scale:.6f}")
+                        print(f"  Small-scale ratio : {small_scale_ratio:.3f} (σ < 0.01)")
+                        print("  ↳ Smaller scale = edge-like detail regions\n")
+
+                        # === 실험 조건에 따라 CSV 파일명 자동 구분 ===
+                        data_name = os.path.basename(dataset.source_path).replace("/", "_")
+                        track_filename = f"gaussian_track_{data_name}.csv"
+                        print('track_filename:', track_filename)
+
+                        track_path = os.path.join(dataset.model_path, track_filename)
+                        with open(track_path, "a", newline="") as f:
+
+                            writer = csv.writer(f)
+                            if f.tell() == 0:
+                                writer.writerow([
+                                    "frame_id", "frame_type",
+                                    "num_gaussians", "mean_scale", "min_scale", "max_scale", "small_scale_ratio"
+                                ])
+                            writer.writerow([
+                                end_view_id - 1, frame_type,
+                                num_gaussians, mean_scale, min_scale, max_scale, small_scale_ratio
+                            ])
+
+
         ## local optimization ##
         first_iter = 0
         progress_bar = tqdm(range(first_iter, opt.iterations), desc="Local Optimization " + str(end_view_id) + "/" + str(num_views) + "(w=" + str(end_view_id-start_view_id) + ")")

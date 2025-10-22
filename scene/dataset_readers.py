@@ -397,10 +397,22 @@ def readFreeSceneInfo(path, images, eval, llffhold=7):
     if eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
         test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+        # === [디버깅용 출력 추가] ===
+        train_indices = [idx for idx in range(len(cam_infos)) if idx % llffhold != 0]
+        test_indices  = [idx for idx in range(len(cam_infos)) if idx % llffhold == 0]
+        print(f"\n[LLFF Split Debug]")
+        print(f"  llffhold value : {llffhold}")
+        print(f"  → Train indices ({len(train_indices)}): {train_indices}")
+        print(f"  → Test  indices ({len(test_indices)}): {test_indices}\n")
     else:
         train_cam_infos = cam_infos
         test_cam_infos = []
-
+        # === [디버깅용 출력 추가] ===
+        print("\n[Train/Test Split Debug]")
+        print(f"  eval = False → using all {len(cam_infos)} frames for training")
+        print(f"  → Train indices: {list(range(len(cam_infos)))}")
+        print("  → Test indices : []\n")
+        
     # 수정된 Train/Test Split 
     # if eval:
     #     test_indices = set()

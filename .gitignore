@@ -21,3 +21,4 @@ tmp
 account.json
 outputs
 outputs_*
+train_jung.py
