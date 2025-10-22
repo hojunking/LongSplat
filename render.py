@@ -385,40 +385,49 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
         test_cameras = scene.getTestCameras()
         train_cameras = scene.getTrainCameras()
 
-        # ✅ free_dataset 전용 처리
+        # free dataset 전용 로직
         if "free" in dataset.model_path:
             print("🚀 Running test rendering for free dataset")
 
             llffhold = 7
             test_indices = set()
+            train_indices = set()
 
-            # dataset_readers.py와 동일한 test split 알고리즘 복제
+            # Train index: 32의 배수
+            for idx in range(0, len(train_cameras) + len(test_cameras), 32):
+                train_indices.add(idx)
+
+            # Test index: llffhold 간격 + 공배수 offset
             for idx in range(0, len(train_cameras) + len(test_cameras), llffhold):
-                if idx % 32 == 0 and idx % llffhold == 0 and idx != 0:
+                if idx == 0 or (idx % 32 == 0 and idx % llffhold == 0):
                     if idx + 1 < len(train_cameras) + len(test_cameras):
                         test_indices.add(idx + 1)
-                        print(f"  🔄 Frame {idx} is LCM → using {idx + 1} instead")
+                        print(f"  🔄 Frame {idx} (0 or LCM) → test as {idx + 1}")
                 else:
                     test_indices.add(idx)
 
             test_indices = sorted(list(test_indices))
-            print(f"📊 llffhold = {llffhold}")
-            print(f"📍 Total test frames: {len(test_indices)}")
+            train_indices = sorted(list(train_indices))
+            print(f"📊 Free dataset split → Train {len(train_indices)}, Test {len(test_indices)}")
 
-            # test_cameras 순회하며 pose alignment 수행
+            # pose alignment: test ↔ 근접 train frame
             for i, viewpoint in enumerate(test_cameras):
                 if i >= len(test_indices):
                     break
                 global_idx = test_indices[i]
-                nearest_train_idx = min(global_idx, len(train_cameras) - 1)
-                ref_viewpoint = train_cameras[nearest_train_idx]
 
+                # 가장 가까운 train frame 찾기 (lower bound 방식)
+                nearest_train_idx = max([t for t in train_indices if t <= global_idx], default=0)
+                if nearest_train_idx > len(train_cameras) - 1:
+                    nearest_train_idx = len(train_cameras) - 1
+
+                ref_viewpoint = train_cameras[nearest_train_idx]
                 viewpoint.update_RT(ref_viewpoint.R, ref_viewpoint.T)
                 pose_estimation_test(gaussians, viewpoint, pipeline, background)
 
-        # ✅ 기존 hike / Tanks / default 처리
+        # 기존 dataset들 (Tanks, hike 등)은 그대로 유지
         else:
-            for idx, viewpoint in enumerate(test_cameras):
+            for idx, viewpoint in enumerate(scene.getTestCameras()):
                 if "hike_dataset" in dataset.model_path:
                     test_frame_every = 10
                 elif "Tanks" in dataset.model_path:
@@ -427,21 +436,21 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
                     test_frame_every = 8
 
                 next_train_idx = viewpoint.uid * test_frame_every - idx
-                if next_train_idx > len(train_cameras) - 1:
-                    next_train_idx = len(train_cameras) - 1
+                if next_train_idx > len(scene.getTrainCameras()) - 1:
+                    next_train_idx = len(scene.getTrainCameras()) - 1
 
-                ref_viewpoint = train_cameras[next_train_idx]
+                ref_viewpoint = scene.getTrainCameras()[next_train_idx]
                 viewpoint.update_RT(ref_viewpoint.R, ref_viewpoint.T)
                 pose_estimation_test(gaussians, viewpoint, pipeline, background)
 
-        # transforms 저장 및 렌더링 실행
-        save_transforms(scene.getTestCameras().copy(), 
+        # transforms 저장 + test set 렌더링
+        save_transforms(scene.getTestCameras().copy(),
                         os.path.join(scene.model_path, "cameras_all_test.json"))
 
         with torch.no_grad():
-            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), 
-                       gaussians, pipeline, background,
-                       original_images_path=original_images_path)
+            render_set(dataset.model_path, "test", scene.loaded_iter,
+                    scene.getTestCameras(), gaussians, pipeline, background,
+                    original_images_path=original_images_path)
 
 
 if __name__ == "__main__":

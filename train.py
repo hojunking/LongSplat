@@ -252,6 +252,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 pre_rendered_depth = pre_render_pkg["depth"][0]
 
                 intrinsic_np = viewpoint_cam.intrinsic.detach().cpu().numpy()
+                # mast3r 매처 호출
                 viewpoint_cam.kp0, viewpoint_cam.kp1, _, _, _, _, _, _, viewpoint_cam.pre_depth_map, viewpoint_cam.depth_map = matcher._forward(pre_viewpoint_cam1.original_image, viewpoint_cam.original_image, intrinsic_np)
                 
                 # ===== 디버깅 코드 추가 =====

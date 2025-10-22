@@ -19,3 +19,5 @@ dataset
 submodules
 tmp
 account.json
+outputs
+outputs_*

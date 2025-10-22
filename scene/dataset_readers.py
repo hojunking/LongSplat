@@ -394,40 +394,46 @@ def readFreeSceneInfo(path, images, eval, llffhold=7):
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
     # 기존
-    # if eval:
-    #     train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
-    #     test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
-    # else:
-    #     train_cam_infos = cam_infos
-    #     test_cam_infos = []
-
-
-    # 수정된 Train/Test Split 
     if eval:
-        test_indices = set()
-        
-        # llffhold 간격으로 test 프레임 선택
-        for idx in range(0, len(cam_infos), llffhold):
-            # idx가 7과 32의 공배수인지 확인
-            if idx % 32 == 0 and idx % llffhold == 0 and idx != 0:
-                # 공배수면 +1 프레임을 test로
-                if idx + 1 < len(cam_infos):
-                    test_indices.add(idx + 1)
-                    print(f"  🔄 Frame {idx} is LCM → using {idx + 1} instead")
-            else:
-                # 공배수가 아니면 그대로 test로
-                test_indices.add(idx)
-        
-        print(f"📊 llffhold = {llffhold}")
-        print(f"📍 Total test frames: {len(test_indices)}")
-        print(f"📍 Test indices: {sorted(test_indices)[:100]}")  # 처음 20개만 출력
-        
-        # Train/Test 분리
-        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx not in test_indices]
-        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in test_indices]
+        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
+        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
     else:
         train_cam_infos = cam_infos
         test_cam_infos = []
+
+    # 수정된 Train/Test Split 
+    # if eval:
+    #     test_indices = set()
+    #     train_indices = set()
+        
+    #     # Train: 4 배수들 
+    #     for idx in range(0, len(cam_infos), 4):
+    #         train_indices.add(idx)
+        
+    #     # Test: llffhold(7) 간격으로 선택
+    #     for idx in range(0, len(cam_infos), llffhold):
+    #         # 0이거나 4과 7의 공배수(LCM=224)인 경우
+    #         if idx == 0 or (idx % 4 == 0 and idx % llffhold == 0):
+    #             # 다음 프레임을 test로
+    #             if idx + 1 < len(cam_infos):
+    #                 test_indices.add(idx + 1)
+    #                 print(f"  🔄 Frame {idx} (0 or LCM of 4 and {llffhold}) → test as frame {idx + 1}")
+    #         else:
+    #             # 그대로 test로
+    #             test_indices.add(idx)
+        
+    #     print(f"📊 llffhold = {llffhold}")
+    #     print(f"📍 Total train frames: {len(train_indices)}")
+    #     print(f"📍 Total test frames: {len(test_indices)}")
+    #     print(f"📍 Train indices (multiples of 4): {sorted(train_indices)[:20]}")
+    #     print(f"📍 Test indices: {sorted(test_indices)[:20]}")
+        
+    #     # Train/Test 분리
+    #     train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in train_indices]
+    #     test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in test_indices]
+    # else:
+    #     train_cam_infos = cam_infos
+    #     test_cam_infos = []
     # 수정 끝
 
     nerf_normalization = None

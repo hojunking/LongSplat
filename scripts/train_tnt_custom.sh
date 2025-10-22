@@ -14,15 +14,13 @@ function rand(){
 }
 ulimit -n 4096
 port=$(rand 10000 30000)
-#scene=("Ballroom" "Barn" "Church" "Family" "Francis" "Horse" "Ignatius")
-scene=("Family" "Horse")
-
+scene=("Barn" "Family" "Museum")
 # "Museum"
 SHEET_NAME="gspread"
 for scene in "${scene[@]}"; do
-    SAVE_PATH="outputs/tanks/baseline2/$scene/"
+    SAVE_PATH="outputs/tanks/base_init_frame=5_2/$scene/"
     
-    python train.py --eval -s "./data/Tanks/$scene" -m "$SAVE_PATH" --port $port --mode tanks
+    python train.py --eval -s "./data/Tanks/$scene" -m "$SAVE_PATH" --port $port --mode tanks --init_frame_num 5
     python render.py -m "$SAVE_PATH"
     python metrics.py -m "$SAVE_PATH"
     
@@ -30,4 +28,6 @@ for scene in "${scene[@]}"; do
     JSON_PATH="${SAVE_PATH}/results.json"
     POSE_PATH="${SAVE_PATH}/test/ours_40000/poses/pose_eval.txt"
     python gspread/gspread-results.py "${JSON_PATH}" "${POSE_PATH}" "${SAVE_PATH}" "${SHEET_NAME}"
+
+
 done
