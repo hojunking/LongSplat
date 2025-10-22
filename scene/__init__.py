@@ -112,21 +112,21 @@ class Scene:
 
 
             # 1. 결과 저장 폴더 생성
-            output_dir = os.path.join(self.model_path, "mast3r_output")
-            os.makedirs(output_dir, exist_ok=True)
+            # output_dir = os.path.join(self.model_path, "mast3r_output")
+            # os.makedirs(output_dir, exist_ok=True)
 
-            # 2. 초기 3D 포인트 클라우드의 '총 개수'만 저장
-            point_count = len(pts3d)
-            count_filename = os.path.join(output_dir, "initial_3d_point_count.txt")
-            with open(count_filename, "w") as f:
-                f.write(str(point_count))
-            print(f"✅ 초기 3D 포인트 총 개수 ({point_count}) 저장 완료.")
+            # # 2. 초기 3D 포인트 클라우드의 '총 개수'만 저장
+            # point_count = len(pts3d)
+            # count_filename = os.path.join(output_dir, "initial_3d_point_count.txt")
+            # with open(count_filename, "w") as f:
+            #     f.write(str(point_count))
+            # print(f"✅ 초기 3D 포인트 총 개수 ({point_count}) 저장 완료.")
 
-            # 3. 프레임 간 매칭 포인트 수를 기록할 파일 준비
-            kp_count_filename = os.path.join(output_dir, "keypoint_match_counts.txt")
-            with open(kp_count_filename, "w") as kp_log_file:
-                # 이후 for 루프에서 이 파일에 기록합니다.
-                print(f"✅ 프레임 간 매칭 포인트 수를 '{kp_count_filename}' 파일에 저장합니다.")
+            # # 3. 프레임 간 매칭 포인트 수를 기록할 파일 준비
+            # kp_count_filename = os.path.join(output_dir, "keypoint_match_counts.txt")
+            # with open(kp_count_filename, "w") as kp_log_file:
+            #     # 이후 for 루프에서 이 파일에 기록합니다.
+            #     print(f"✅ 프레임 간 매칭 포인트 수를 '{kp_count_filename}' 파일에 저장합니다.")
             # ============ 실험 코드 끝 ============
 
             if intrinsic_np is None:
@@ -147,9 +147,9 @@ class Scene:
                         intrinsic_np
                     )
                     # ============ 매칭 포인트 수 저장 (프레임 0-1) ============
-                    match_count = len(cur_viewpoint_cam.kp0)
-                    with open(kp_count_filename, "a") as kp_log_file:
-                        kp_log_file.write(f"Frame Pair 0-1: {match_count}\n")
+                    # match_count = len(cur_viewpoint_cam.kp0)
+                    # with open(kp_count_filename, "a") as kp_log_file:
+                    #     kp_log_file.write(f"Frame Pair 0-1: {match_count}\n")
                     # =======================================================
                     cur_viewpoint_cam.depth_map = torch.from_numpy(depth_maps[i]).float().cuda().detach()
                     cur_viewpoint_cam.depth_map = F.interpolate(cur_viewpoint_cam.depth_map.unsqueeze(0).unsqueeze(0), 
@@ -168,9 +168,9 @@ class Scene:
                         intrinsic_np
                     )
                     # ============ 매칭 포인트 수 저장 (이후 프레임 쌍) ============
-                    match_count = len(cur_viewpoint_cam.kp0)
-                    with open(kp_count_filename, "a") as kp_log_file:
-                        kp_log_file.write(f"Frame Pair {i-1}-{i}: {match_count}\n")
+                    # match_count = len(cur_viewpoint_cam.kp0)
+                    # with open(kp_count_filename, "a") as kp_log_file:
+                    #     kp_log_file.write(f"Frame Pair {i-1}-{i}: {match_count}\n")
                     # ===============================================================
                     cur_viewpoint_cam.conf = torch.ones(cur_viewpoint_cam.kp0.shape[0], device=cur_viewpoint_cam.kp0.device)
                     cur_viewpoint_cam.depth_map = torch.from_numpy(depth_maps[i]).float().cuda().detach()

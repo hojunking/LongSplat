@@ -492,15 +492,27 @@ def readTanksSceneInfo(path, images, eval, llffhold=9):
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
     if eval:
-        llffhold = 2 if "Family" in path else 8
+        llffhold = 3 if "Family" in path else 9
         ids = np.arange(len(cam_infos))
         i_test = ids[int(llffhold/2)::llffhold]
         i_train = np.array([i for i in ids if i not in i_test])
         train_cam_infos = [cam_infos[i] for i in i_train]
         test_cam_infos = [cam_infos[i] for i in i_test]
+        # === [디버깅용 출력 추가] ===
+        train_indices = [idx for idx in range(len(cam_infos)) if idx % llffhold != 0]
+        test_indices  = [idx for idx in range(len(cam_infos)) if idx % llffhold == 0]
+        print(f"\n[LLFF Split Debug]")
+        print(f"  llffhold value : {llffhold}")
+        print(f"  → Train indices ({len(train_indices)}): {train_indices}")
+        print(f"  → Test  indices ({len(test_indices)}): {test_indices}\n")
     else:
         train_cam_infos = cam_infos
         test_cam_infos = []
+        # === [디버깅용 출력 추가] ===
+        print("\n[Train/Test Split Debug]")
+        print(f"  eval = False → using all {len(cam_infos)} frames for training")
+        print(f"  → Train indices: {list(range(len(cam_infos)))}")
+        print("  → Test indices : []\n")
 
     nerf_normalization = None
 
