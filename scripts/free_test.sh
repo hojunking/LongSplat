@@ -20,7 +20,7 @@ scenes=("grass")
 
 for scene in "${scenes[@]}"; do
     timestamp=$(date "+%Y-%m-%d_%H:%M:%S")
-    python train.py --eval -s ./data/compress-x/free_dataset/$scene -m outputs/free-test/com-x/$scene/ -r 2 --port $port --mode free
+    python train.py --eval -s ./data/compress-o/free_dataset/qp32/$scene -m outputs/free-test/qp32/$scene/ -r 2 --port $port --mode free
     # python render.py -m outputs/free-test/$scene/
     # python metrics.py -m outputs/free-test/$scene/
 done

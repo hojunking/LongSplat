@@ -374,7 +374,7 @@ def readEvalSceneInfo(path, model_path, images, eval, llffhold=8):
 
 # train/test 나눔.
 # def readFreeSceneInfo(path, images, eval, llffhold=8):
-def readFreeSceneInfo(path, images, eval, llffhold=7):
+def readFreeSceneInfo(path, images, eval, llffhold=9):
     if os.path.exists(os.path.join(path, "sparse")):
         try:
             cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
@@ -412,7 +412,7 @@ def readFreeSceneInfo(path, images, eval, llffhold=7):
         print(f"  eval = False → using all {len(cam_infos)} frames for training")
         print(f"  → Train indices: {list(range(len(cam_infos)))}")
         print("  → Test indices : []\n")
-        
+
     # 수정된 Train/Test Split 
     # if eval:
     #     test_indices = set()
@@ -471,7 +471,8 @@ def readFreeSceneInfo(path, images, eval, llffhold=7):
     return scene_info
 
 # train/test 나눔.
-def readTanksSceneInfo(path, images, eval, llffhold=8):
+# def readTanksSceneInfo(path, images, eval, llffhold=8):
+def readTanksSceneInfo(path, images, eval, llffhold=9):
     if os.path.exists(os.path.join(path, "sparse")):
         try:
             cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")

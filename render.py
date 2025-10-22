@@ -384,9 +384,9 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
             if "hike_dataset" in dataset.model_path:
                 test_frame_every = 10
             elif "Tanks" in dataset.model_path:
-                test_frame_every = 2 if "Family" in dataset.model_path else 8
+                test_frame_every = 3 if "Family" in dataset.model_path else 9
             else:
-                test_frame_every = 8
+                test_frame_every = 9
             next_train_idx = viewpoint.uid * test_frame_every - idx
             if next_train_idx > len(scene.getTrainCameras()) - 1:
                 next_train_idx = len(scene.getTrainCameras()) - 1
