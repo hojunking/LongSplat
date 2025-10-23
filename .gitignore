@@ -22,3 +22,5 @@ account.json
 outputs
 outputs_*
 train_jung.py
+train_log.py
+data.zip
