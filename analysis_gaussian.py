@@ -4,7 +4,7 @@ import seaborn as sns
 import os
 
 # === 경로 설정 ===
-csv_path = "/workdir/outputs/free/grass_qp37/gaussian_track_grass.csv"
+csv_path = "/workdir/outputs/free/grass_qp37_jung_2/gaussian_track_grass.csv"
 save_dir = os.path.join(os.path.dirname(csv_path), "analysis_results")
 os.makedirs(save_dir, exist_ok=True)
 

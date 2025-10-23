@@ -6,10 +6,9 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-
 import os
 import numpy as np
-
+import pandas as pd
 import subprocess
 cmd = 'nvidia-smi -q -d Memory |grep -A4 GPU|grep Used'
 result = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE).stdout.decode().split('\n')
@@ -36,6 +35,48 @@ from utils.mast3r_utils import Mast3rMatcher
 import cv2
 from scipy.optimize import least_squares
 from torch.optim.lr_scheduler import ExponentialLR
+
+
+# csv 기록
+# Line 18 (import torch 이후)
+import csv
+import datetime
+
+# 전역 변수
+csv_log_file = None
+
+def init_loss_csv(model_path, data_type):
+    """Loss 로그 CSV 파일 초기화"""
+    global csv_log_file
+    csv_log_file = os.path.join(model_path, f"loss_log_{data_type}.csv")
+    
+    with open(csv_log_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            'timestamp', 'frame_id', 'stage', 'iteration', 
+            'total_loss', 'l1_loss', 'ssim_loss', 'num_keypoints'
+        ])
+    
+    return csv_log_file
+
+def log_loss_to_csv(frame_id, stage, iteration, loss_dict):
+    """Loss를 CSV에 기록"""
+    global csv_log_file
+    if csv_log_file is None:
+        return
+    
+    with open(csv_log_file, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            frame_id,
+            stage,
+            iteration,
+            loss_dict.get('total_loss', 0),
+            loss_dict.get('l1_loss', 0),
+            loss_dict.get('ssim_loss', 0),
+            loss_dict.get('num_keypoints', 0)
+        ])
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -66,6 +107,21 @@ def reprojection_error(params, points_3d, points_2d, K):
 
 def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
     tb_writer = prepare_output_and_logger(dataset)
+
+    # ===== CSV 로그 초기화 추가 =====
+    data_type = "compressed" if "comp" in dataset.source_path else "original"
+    csv_file = init_loss_csv(dataset.model_path, data_type)
+    logger.info(f"📊 Loss log will be saved to: {csv_file}")
+    
+
+
+    # === 프레임 타입 CSV 로드 ===
+    frame_type_path = "./comp_log/x265_3dgs-dataset__free_dataset__free_dataset__grass__images_qp37.csv"
+    frame_info_df = pd.read_csv(frame_type_path)
+
+    # ===== 초기화 끝 =====
+
+
     gaussians = GaussianModel(dataset.feat_dim, dataset.n_offsets, dataset.voxel_size, dataset.update_depth, dataset.update_init_factor, dataset.update_hierachy_factor, dataset.use_feat_bank, 
                               dataset.appearance_dim, dataset.ratio, dataset.add_opacity_dist, dataset.add_cov_dist, dataset.add_color_dist)
     scene = Scene(dataset, gaussians)
@@ -204,12 +260,40 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 pre_rendered_depth = pre_render_pkg["depth"][0]
 
                 intrinsic_np = viewpoint_cam.intrinsic.detach().cpu().numpy()
+                # mast3r 매처 호출
                 viewpoint_cam.kp0, viewpoint_cam.kp1, _, _, _, _, _, _, viewpoint_cam.pre_depth_map, viewpoint_cam.depth_map = matcher._forward(pre_viewpoint_cam1.original_image, viewpoint_cam.original_image, intrinsic_np)
+                
+                # ===== 디버깅 코드 추가 =====
+                print(f"\n=== Debug Info at frame {end_view_id-1} ===")
+                print(f"pre_rendered_depth shape: {pre_rendered_depth.shape}")
+                print(f"pre_rendered_depth min/max: {pre_rendered_depth.min():.4f}/{pre_rendered_depth.max():.4f}")
+                print(f"pre_rendered_depth has nan: {torch.isnan(pre_rendered_depth).any()}")
+                print(f"pre_rendered_depth has inf: {torch.isinf(pre_rendered_depth).any()}")
+                print(f"kp0 shape: {viewpoint_cam.kp0.shape}")
+                print(f"kp0 device: {viewpoint_cam.kp0.device}")
+                print(f"kp0 min/max: {viewpoint_cam.kp0.min():.4f}/{viewpoint_cam.kp0.max():.4f}")
+                print(f"Number of keypoints: {viewpoint_cam.kp0.shape[0]}")
+                
+                # kp0가 비어있는지 확인
+                if viewpoint_cam.kp0.shape[0] == 0:
+                    print("WARNING: No keypoints detected!")
+                    viewpoint_cam.is_registered = False
+                    end_view_id -= 1
+                    continue  # 이 프레임 건너뛰기
+                
+                
+                # 원본 코드
                 viewpoint_cam.conf = torch.ones(viewpoint_cam.kp0.shape[0], device=viewpoint_cam.kp0.device)
                 viewpoint_cam.kp0 = viewpoint_cam.kp0.cuda()
                 viewpoint_cam.kp1 = viewpoint_cam.kp1.cuda()
                 viewpoint_cam.depth_map = viewpoint_cam.depth_map.cuda()
                 viewpoint_cam.pre_depth_map = viewpoint_cam.pre_depth_map.cuda()
+
+                # 디버깅 코드
+                print(f"Calling unproject with:")
+                print(f"  depth shape: {pre_rendered_depth.shape}")
+                print(f"  kp0 shape: {viewpoint_cam.kp0.shape}")
+                # ===== 디버깅 코드 끝 =====
 
                 pre_pts = unporject(pre_rendered_depth, pre_viewpoint_cam1.view_world_transform, pre_viewpoint_cam1.intrinsic, viewpoint_cam.kp0)
                 
@@ -271,6 +355,21 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                                                     view2.view_world_transform, view1.world_view_transform, view2.intrinsic)
                     loss += loss_2d * opt.loss_2d_correspondence_weight
 
+                # ===== Loss 기록 추가 (마지막 iteration에만) =====
+                if iteration == pose_iteration - 1:
+                    log_loss_to_csv(
+                        frame_id=end_view_id - 1,
+                        stage='pose_estimation',
+                        iteration=iteration,
+                        loss_dict={
+                            'total_loss': loss.item(),
+                            'l1_loss': Ll1.item(),
+                            'ssim_loss': 0,
+                            'num_keypoints': viewpoint_cam.kp0.shape[0]
+                        }
+                    )
+                # ===== 기록 끝 =====
+
                 loss.backward()
 
                 with torch.no_grad():
@@ -292,7 +391,47 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 if densify_mask.sum() > 0:
                     depth_ref =viewpoint_cam.depth_map.cuda()
                     gaussians.densify_occlusion(viewpoint_cam, depth_ref, densify_mask)
-        
+
+
+                    # === [추가] 프레임별 Gaussian 통계 출력 ===
+                    with torch.no_grad():
+                        num_gaussians = gaussians.get_anchor.shape[0]
+                        scales = gaussians.get_scaling
+                        mean_scale = scales.mean().item()
+                        min_scale = scales.min().item()
+                        max_scale = scales.max().item()
+                        small_scale_ratio = (scales < 0.01).float().mean().item()
+
+                        # 프레임 타입 가져오기 (CSV에서 Type 열 사용)
+                        frame_type = frame_info_df.loc[end_view_id - 1, " Type"] if end_view_id - 1 < len(frame_info_df) else "NA"
+
+                        print(f"\n[Frame {end_view_id-1} | {frame_type}-frame] Gaussian Stats")
+                        print(f"  Total Gaussians   : {num_gaussians}")
+                        print(f"  Mean scale        : {mean_scale:.6f}")
+                        print(f"  Min / Max scale   : {min_scale:.6f} / {max_scale:.6f}")
+                        print(f"  Small-scale ratio : {small_scale_ratio:.3f} (σ < 0.01)")
+                        print("  ↳ Smaller scale = edge-like detail regions\n")
+
+                        # === 실험 조건에 따라 CSV 파일명 자동 구분 ===
+                        data_name = os.path.basename(dataset.source_path).replace("/", "_")
+                        track_filename = f"gaussian_track_{data_name}.csv"
+                        print('track_filename:', track_filename)
+
+                        track_path = os.path.join(dataset.model_path, track_filename)
+                        with open(track_path, "a", newline="") as f:
+
+                            writer = csv.writer(f)
+                            if f.tell() == 0:
+                                writer.writerow([
+                                    "frame_id", "frame_type",
+                                    "num_gaussians", "mean_scale", "min_scale", "max_scale", "small_scale_ratio"
+                                ])
+                            writer.writerow([
+                                end_view_id - 1, frame_type,
+                                num_gaussians, mean_scale, min_scale, max_scale, small_scale_ratio
+                            ])
+
+
         ## local optimization ##
         first_iter = 0
         progress_bar = tqdm(range(first_iter, opt.iterations), desc="Local Optimization " + str(end_view_id) + "/" + str(num_views) + "(w=" + str(end_view_id-start_view_id) + ")")
@@ -355,6 +494,20 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                                                    view2.view_world_transform.detach(), view1.world_view_transform, view2.intrinsic)
                 loss += loss_2d_2 * opt.loss_2d_correspondence_weight
 
+            # ===== Local Optimization Loss 기록 =====
+            if iteration == opt.iterations:
+                log_loss_to_csv(
+                    frame_id=end_view_id,
+                    stage='local_optimization',
+                    iteration=iteration,
+                    loss_dict={
+                        'total_loss': loss.item(),
+                        'l1_loss': Ll1.item(),
+                        'ssim_loss': ssim_loss.item(),
+                        'num_keypoints': 0
+                    }
+                )
+            # ===== 기록 끝 =====
             loss.backward()
 
             with torch.no_grad():
@@ -457,6 +610,20 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                                                    view2.view_world_transform.detach(), view1.world_view_transform, view2.intrinsic)
                 loss += loss_2d_2 * opt.loss_2d_correspondence_weight
             
+            # ===== Global Optimization Loss 기록 =====
+            if iteration == opt.iterations:
+                log_loss_to_csv(
+                    frame_id=end_view_id,
+                    stage='global_optimization',
+                    iteration=iteration,
+                    loss_dict={
+                        'total_loss': loss.item(),
+                        'l1_loss': Ll1.item(),
+                        'ssim_loss': ssim_loss.item(),
+                        'num_keypoints': 0
+                    }
+                )
+            # ===== 기록 끝 =====
             loss.backward()
 
             with torch.no_grad():
