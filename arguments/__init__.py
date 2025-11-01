@@ -167,8 +167,11 @@ class OptimizationParams(ParamGroup):
         self.window_size = 5
         self.post_iter = 10000
 
-        self.qp_json = ""
-        self.lower_bound = 0.5
+        self.s_mu = 0.3
+        self.d_mu = 0.3
+
+        self.enable_dropgaussian = False
+        self.drop_max = 0.05
 
         super().__init__(parser, "Optimization Parameters")
 
