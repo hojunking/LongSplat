@@ -125,6 +125,9 @@ class GaussianModel:
             nn.Sigmoid()
         ).cuda()
 
+        # 추가
+        self._importance = torch.empty(0, device="cuda")
+
 
     def eval(self):
         self.mlp_opacity.eval()
@@ -911,9 +914,8 @@ class GaussianModel:
                 self._offset = optimizable_tensors["offset"]
                 self._opacity = optimizable_tensors["opacity"]
 
-
-
-    def adjust_anchor(self, check_interval=100, success_threshold=0.8, grad_threshold=0.0002, min_opacity=0.005, require_purning=True):
+    
+    def adjust_anchor_song(self, check_interval=100, success_threshold=0.8, grad_threshold=0.0002, min_opacity=0.005, require_purning=True, mu=0.3):
         # # adding anchors
         grads = self.offset_gradient_accum / self.offset_denom  # [N*k, 1]
         grads[grads.isnan()] = 0.0
@@ -934,10 +936,63 @@ class GaussianModel:
         self.offset_gradient_accum = torch.cat([self.offset_gradient_accum, padding_offset_gradient_accum], dim=0)
 
         if require_purning:
-            # # prune anchors
-            prune_mask = (self.opacity_accum < min_opacity * self.anchor_demon).squeeze(dim=1)
-            anchors_mask = (self.anchor_demon > check_interval * success_threshold).squeeze(dim=1)  # [N, 1]
-            prune_mask = torch.logical_and(prune_mask, anchors_mask)  # [N] 
+            # ---- 1) opacity 기준 1차 pruning ----
+            prune_mask_opacity = (self.opacity_accum < min_opacity * self.anchor_demon).squeeze(dim=1)
+            anchors_mask = (self.anchor_demon > check_interval * success_threshold).squeeze(dim=1)
+            prune_mask_opacity = torch.logical_and(prune_mask_opacity, anchors_mask)
+
+            # ---- 2) scale 기반 보정 ----
+            scales = torch.exp(self._scaling[:, :3])
+            num_anchors = self.get_anchor.shape[0]
+            expected_len = num_anchors * self.n_offsets
+
+            if scales.shape[0] > expected_len:
+                scales = scales[:expected_len, :]
+            elif scales.shape[0] < expected_len:
+                pad_len = expected_len - scales.shape[0]
+                pad = torch.ones((pad_len, 3), device=scales.device, dtype=scales.dtype)
+                scales = torch.cat([scales, pad], dim=0)
+
+            if self.n_offsets > 1:
+                scales_anchor = scales.view(num_anchors, self.n_offsets, 3).mean(dim=1)
+            else:
+                scales_anchor = scales
+
+            U = torch.norm(scales_anchor, dim=1)
+            U_median = torch.median(U)
+            U_tilde = U / (U_median + 1e-8)
+
+            lambda_s = mu
+            scale_weight = torch.exp(-lambda_s * U_tilde)
+            importance = self.opacity_accum.squeeze() * scale_weight
+
+            prune_mask_scale = (importance < min_opacity * self.anchor_demon.squeeze())
+            prune_mask_scale = torch.logical_and(prune_mask_scale, anchors_mask)
+
+            # ---- 3) 최종 마스크 (scale 보정 포함) ----
+            prune_mask_final = prune_mask_scale
+
+            # ✅ LOGGING
+            total_anchors = num_anchors
+            pruned_opacity = int(prune_mask_opacity.sum().item())
+            pruned_scale = int(prune_mask_scale.sum().item())
+            additional_scale = pruned_scale - pruned_opacity if pruned_scale > pruned_opacity else 0
+            kept = total_anchors - pruned_scale
+
+            # mean_scale = float(scales_anchor.mean().item())
+            # median_scale = float(U_median.item())
+            # mean_importance = float(importance.mean().item())
+
+            # print(
+            #     f"[ScalePrune] total={total_anchors} | "
+            #     f"opacity_pruned={pruned_opacity} | "
+            #     f"scale_pruned={pruned_scale} (+{additional_scale}) | "
+            #     f"kept={kept}"
+            # )
+
+            # ---- 4) pruning 실제 적용 ----
+            prune_mask = prune_mask_final
+            
 
             # update offset_denom
             offset_denom = self.offset_denom.view([-1, self.n_offsets])[~prune_mask]
@@ -968,8 +1023,218 @@ class GaussianModel:
 
         self.max_radii2D = torch.zeros((self.get_anchor.shape[0]), device="cuda")
 
-    
-    
+
+    def adjust_anchor(self, check_interval=100, success_threshold=0.8, grad_threshold=0.0002, min_opacity=0.005, require_purning=True):
+        # # adding anchors
+        grads = self.offset_gradient_accum / self.offset_denom  # [N*k, 1]
+        grads[grads.isnan()] = 0.0
+        grads_norm = torch.norm(grads, dim=-1)
+        offset_mask = (self.offset_denom > check_interval * success_threshold * 0.5).squeeze(dim=1)
+        
+        self.anchor_growing(grads_norm, grad_threshold, offset_mask)
+
+        # update offset_denom
+        self.offset_denom[offset_mask] = 0
+        padding_offset_denom = torch.zeros([self.get_anchor.shape[0] * self.n_offsets - self.offset_denom.shape[0], 1],
+                                        dtype=torch.int32, device=self.offset_denom.device)
+        self.offset_denom = torch.cat([self.offset_denom, padding_offset_denom], dim=0)
+
+        self.offset_gradient_accum[offset_mask] = 0
+        padding_offset_gradient_accum = torch.zeros([self.get_anchor.shape[0] * self.n_offsets - self.offset_gradient_accum.shape[0], 1],
+                                                    dtype=torch.int32, device=self.offset_gradient_accum.device)
+        self.offset_gradient_accum = torch.cat([self.offset_gradient_accum, padding_offset_gradient_accum], dim=0)
+
+        if require_purning:
+            # # prune anchors
+            prune_mask = (self.opacity_accum < min_opacity * self.anchor_demon).squeeze(dim=1)
+            anchors_mask = (self.anchor_demon > check_interval * success_threshold).squeeze(dim=1)  # [N, 1]
+            prune_mask = torch.logical_and(prune_mask, anchors_mask)  # [N] 
+        
+            # update offset_denom
+            offset_denom = self.offset_denom.view([-1, self.n_offsets])[~prune_mask]
+            offset_denom = offset_denom.view([-1, 1])
+            del self.offset_denom
+            self.offset_denom = offset_denom
+
+            offset_gradient_accum = self.offset_gradient_accum.view([-1, self.n_offsets])[~prune_mask]
+            offset_gradient_accum = offset_gradient_accum.view([-1, 1])
+            del self.offset_gradient_accum
+            self.offset_gradient_accum = offset_gradient_accum
+            
+            # update opacity accum
+            if anchors_mask.sum() > 0:
+                self.opacity_accum[anchors_mask] = torch.zeros([anchors_mask.sum(), 1], device='cuda').float()
+                self.anchor_demon[anchors_mask] = torch.zeros([anchors_mask.sum(), 1], device='cuda').float()
+
+            temp_opacity_accum = self.opacity_accum[~prune_mask]
+            del self.opacity_accum
+            self.opacity_accum = temp_opacity_accum
+
+            temp_anchor_demon = self.anchor_demon[~prune_mask]
+            del self.anchor_demon
+            self.anchor_demon = temp_anchor_demon
+
+            if prune_mask.shape[0] > 0:
+                self.prune_anchor(prune_mask)
+
+        self.max_radii2D = torch.zeros((self.get_anchor.shape[0]), device="cuda")
+
+
+    def adjust_anchor_heejung(
+        self,
+        check_interval=100,
+        success_threshold=0.8,
+        grad_threshold=0.0002,
+        min_opacity=0.005,
+        require_purning=True,
+        frame_trust=1.0,   ### 🌟 추가됨
+        bit_trust=0.0,     ### 🌟 추가됨
+        debug=False        ### 🌟 추가됨
+    ):
+        # =========================================================
+        # 🔹 1. grad_threshold 동적 조정 (비선형 역비례식)
+        # =========================================================
+        dynamic_grad_threshold = grad_threshold / (1.0 + bit_trust + frame_trust)   ### 🌟 추가됨
+        dynamic_grad_threshold = max(dynamic_grad_threshold, grad_threshold * 0.3)  ### 🌟 추가됨
+
+        if debug:  ### 🌟 추가됨
+            print(f"[Adjust Anchor] bit={bit_trust:.3f}, frame={frame_trust:.3f} "
+                f"→ grad_th {grad_threshold:.5f} → {dynamic_grad_threshold:.5f}")
+
+        # =========================================================
+        # 기존 anchor_growing 로직 (grad_threshold만 수정)
+        # =========================================================
+        grads = self.offset_gradient_accum / self.offset_denom
+        grads[grads.isnan()] = 0.0
+        grads_norm = torch.norm(grads, dim=-1)
+        offset_mask = (self.offset_denom > check_interval * success_threshold * 0.5).squeeze(dim=1)
+
+        self.anchor_growing(grads_norm, dynamic_grad_threshold, offset_mask)  ### 🌟 grad_threshold → dynamic_grad_threshold
+
+        # =========================================================
+        # 이후 부분: 원본 코드 동일
+        # =========================================================
+        self.offset_denom[offset_mask] = 0
+        padding_offset_denom = torch.zeros(
+            [self.get_anchor.shape[0] * self.n_offsets - self.offset_denom.shape[0], 1],
+            dtype=torch.int32, device=self.offset_denom.device
+        )
+        self.offset_denom = torch.cat([self.offset_denom, padding_offset_denom], dim=0)
+
+        self.offset_gradient_accum[offset_mask] = 0
+        padding_offset_gradient_accum = torch.zeros(
+            [self.get_anchor.shape[0] * self.n_offsets - self.offset_gradient_accum.shape[0], 1],
+            dtype=torch.int32, device=self.offset_gradient_accum.device
+        )
+        self.offset_gradient_accum = torch.cat([self.offset_gradient_accum, padding_offset_gradient_accum], dim=0)
+
+        if require_purning:
+            prune_mask = (self.opacity_accum < min_opacity * self.anchor_demon).squeeze(dim=1)  ### 🌟 opacity는 기존 값 유지
+            anchors_mask = (self.anchor_demon > check_interval * success_threshold).squeeze(dim=1)
+            prune_mask = torch.logical_and(prune_mask, anchors_mask)
+        
+            offset_denom = self.offset_denom.view([-1, self.n_offsets])[~prune_mask]
+            offset_denom = offset_denom.view([-1, 1])
+            del self.offset_denom
+            self.offset_denom = offset_denom
+
+            offset_gradient_accum = self.offset_gradient_accum.view([-1, self.n_offsets])[~prune_mask]
+            offset_gradient_accum = offset_gradient_accum.view([-1, 1])
+            del self.offset_gradient_accum
+            self.offset_gradient_accum = offset_gradient_accum
+            
+            if anchors_mask.sum() > 0:
+                self.opacity_accum[anchors_mask] = torch.zeros([anchors_mask.sum(), 1], device='cuda').float()
+                self.anchor_demon[anchors_mask] = torch.zeros([anchors_mask.sum(), 1], device='cuda').float()
+
+            temp_opacity_accum = self.opacity_accum[~prune_mask]
+            del self.opacity_accum
+            self.opacity_accum = temp_opacity_accum
+
+            temp_anchor_demon = self.anchor_demon[~prune_mask]
+            del self.anchor_demon
+            self.anchor_demon = temp_anchor_demon
+
+            if prune_mask.shape[0] > 0:
+                self.prune_anchor(prune_mask)
+
+        self.max_radii2D = torch.zeros((self.get_anchor.shape[0]), device="cuda")
+
+        if debug:  ### 🌟 추가됨
+            print(f"[Adjust Anchor Done] Grad_Th={dynamic_grad_threshold:.6f}")
+
+
+    # def adjust_anchor_heejung (self,
+    #                 check_interval=100,
+    #                 success_threshold=0.8,
+    #                 grad_threshold=0.0002,
+    #                 min_opacity=0.005,
+    #                 require_purning=True,
+    #                 frame_trust=1.0):  ### 🌟 수정됨: frame_trust 인자 추가
+    #     """
+    #     frame_trust: [0.0 ~ 1.0] 사이 값 (frame_trust_dict[frame_id])
+    #                     높을수록 중요한 프레임 → 더 많은 growing, 덜 pruning
+    #     """
+
+    #     dynamic_grad_threshold = grad_threshold * (1.1 - 0.2 * frame_trust)
+    #     dynamic_min_opacity = min_opacity * (0.9 + 0.2 * frame_trust)
+
+    #     # if frame_trust < 0.5:  ### 🌟 수정됨: frame_trust 로그 추가
+    #     #     print(f"[Adjust Anchor] Low-trust frame ({frame_trust:.2f}) → grad_th ↑ {dynamic_grad_threshold:.5f}, min_op ↓ {dynamic_min_opacity:.5f}")
+    #     # else:
+    #     #     print(f"[Adjust Anchor] High-trust frame ({frame_trust:.2f}) → grad_th ↓ {dynamic_grad_threshold:.5f}, min_op ↑ {dynamic_min_opacity:.5f}")
+
+    #     grads = self.offset_gradient_accum / self.offset_denom
+    #     grads[grads.isnan()] = 0.0
+    #     grads_norm = torch.norm(grads, dim=-1)
+    #     offset_mask = (self.offset_denom > check_interval * success_threshold * 0.5).squeeze(dim=1)
+
+    #     self.anchor_growing(grads_norm, dynamic_grad_threshold, offset_mask)  ### 🌟 수정됨: grad_threshold → dynamic_grad_threshold
+
+    #     self.offset_denom[offset_mask] = 0
+    #     padding_offset_denom = torch.zeros(
+    #         [self.get_anchor.shape[0] * self.n_offsets - self.offset_denom.shape[0], 1],
+    #         dtype=torch.int32, device=self.offset_denom.device
+    #     )
+    #     self.offset_denom = torch.cat([self.offset_denom, padding_offset_denom], dim=0)
+
+    #     self.offset_gradient_accum[offset_mask] = 0
+    #     padding_offset_gradient_accum = torch.zeros(
+    #         [self.get_anchor.shape[0] * self.n_offsets - self.offset_gradient_accum.shape[0], 1],
+    #         dtype=torch.int32, device=self.offset_gradient_accum.device
+    #     )
+    #     self.offset_gradient_accum = torch.cat([self.offset_gradient_accum, padding_offset_gradient_accum], dim=0)
+
+    #     if require_purning:
+    #         prune_mask = (self.opacity_accum < dynamic_min_opacity * self.anchor_demon).squeeze(dim=1)  ### 🌟 수정됨: min_opacity → dynamic_min_opacity
+    #         anchors_mask = (self.anchor_demon > check_interval * success_threshold).squeeze(dim=1)
+    #         prune_mask = torch.logical_and(prune_mask, anchors_mask)
+
+    #         offset_denom = self.offset_denom.view([-1, self.n_offsets])[~prune_mask]
+    #         offset_denom = offset_denom.view([-1, 1])
+    #         self.offset_denom = offset_denom
+
+    #         offset_gradient_accum = self.offset_gradient_accum.view([-1, self.n_offsets])[~prune_mask]
+    #         offset_gradient_accum = offset_gradient_accum.view([-1, 1])
+    #         self.offset_gradient_accum = offset_gradient_accum
+
+    #         if anchors_mask.sum() > 0:
+    #             self.opacity_accum[anchors_mask] = torch.zeros([anchors_mask.sum(), 1], device='cuda').float()
+    #             self.anchor_demon[anchors_mask] = torch.zeros([anchors_mask.sum(), 1], device='cuda').float()
+
+    #         temp_opacity_accum = self.opacity_accum[~prune_mask]
+    #         self.opacity_accum = temp_opacity_accum
+
+    #         temp_anchor_demon = self.anchor_demon[~prune_mask]
+    #         self.anchor_demon = temp_anchor_demon
+
+    #         if prune_mask.shape[0] > 0:
+    #             self.prune_anchor(prune_mask)
+
+    #     self.max_radii2D = torch.zeros((self.get_anchor.shape[0]), device="cuda")
+
+
+
     @torch.no_grad()
     def densify_occlusion(self, view, depth, opacity_mask):
         H, W = depth.shape
@@ -1145,3 +1410,9 @@ class GaussianModel:
                 self.embedding_appearance.load_state_dict(checkpoint['appearance'])
         else:
             raise NotImplementedError
+
+
+    # 새로 추가
+    def append_importance(self, num_new, val):
+        new_vals = torch.full((num_new, 1), val, device="cuda")
+        self.importance = torch.cat([self.importance, new_vals], dim=0)
