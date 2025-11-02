@@ -31,6 +31,7 @@ from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from utils.pose_utils import save_transforms, update_pose
+from utils.dropout_weighting import get_dropout_rate
 from utils.graphics_utils import get_occlusion_mask, unporject, compute_scale
 from utils.mast3r_utils import Mast3rMatcher
 import cv2
@@ -348,8 +349,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
 
             # === Inlier-guided light DropGaussian ===
             # inlier ratio 가져오기 (없으면 기본값 1.0)
-            inlier_ratio = getattr(viewpoint_cam, "inlier_ratio", 1.0)
-            drop_rate = min(d_mu * (1.0 - inlier_ratio), 0.5)  # 낮을수록 drop↑
+            drop_rate = get_dropout_rate(viewpoint_cam, opt.d_mu, verbose=True)
 
             # if iteration % 50 == 0:  # 50 step마다 한 번씩 출력 (너무 자주 찍히면 느려짐)
             #     print(f"[Iter {iteration:05d}] inlier_ratio={inlier_ratio:.3f}, drop_rate={drop_rate:.3f}, "
@@ -459,34 +459,15 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             rendered_depth = render_pkg["depth"][0]
             
             gt_image = viewpoint_cam.original_image.cuda()
-            
             Ll1 = l1_loss(image, gt_image)
 
             if FUSED_SSIM_AVAILABLE:
                 ssim_loss = (1 - fused_ssim(image.unsqueeze(0), gt_image.unsqueeze(0)))
             else:
                 ssim_loss = (1 - ssim(image, gt_image))
-
-            # === Inlier-guided light DropGaussian ===
-            # inlier ratio 가져오기 (없으면 기본값 1.0)
-            inlier_ratio = getattr(viewpoint_cam, "inlier_ratio", 1.0)
-            drop_rate = min(d_mu * (1.0 - inlier_ratio), 0.5)  # 낮을수록 drop↑
-
-            if drop_rate > 0:
-                # 랜덤하게 일부 픽셀의 photometric loss를 drop
-                drop_mask = (torch.rand_like(Ll1) > drop_rate).float()
-                Ll1 = (Ll1 * drop_mask).mean()
-                drop_mask_ssim = (torch.rand_like(ssim_loss) > drop_rate).float()
-                ssim_loss = (ssim_loss * drop_mask_ssim).mean()
-            
-            # if iteration % 50 == 0:  # 50 step마다 한 번씩 출력 (너무 자주 찍히면 느려짐)
-            #     print(f"[Iter {iteration:05d}] inlier_ratio={inlier_ratio:.3f}, drop_rate={drop_rate:.3f}, "
-            #         f"num_inliers={getattr(viewpoint_cam, 'num_inliers', -1)}, "
-            #         f"num_keypoints={getattr(viewpoint_cam, 'num_keypoints', -1)}")
-            # scaling regularization
             scaling_reg = scaling.prod(dim=1).mean()
-            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01 * scaling_reg
-
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01*scaling_reg
+            
             # Depth loss
             if opt.depth_loss_weight > 0:
                 midas_depth = viewpoint_cam.depth_map.detach().cuda()
