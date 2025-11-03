@@ -26,7 +26,6 @@ import sys
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
 from utils.compression_aware_utils import apply_inlier_weighted_pose_grad
-from utils.pose_weighting import compute_pose_weight
 import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
