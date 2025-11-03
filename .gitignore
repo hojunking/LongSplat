@@ -26,4 +26,3 @@ train_jung.py
 train_log.py
 data.zip
 data_*.zip
-utils/compression_aware_utils.py
