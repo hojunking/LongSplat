@@ -62,3 +62,12 @@ def get_dropout_rate(viewpoint_cam, d_mu=0.3, verbose=True):
     return drop_rate
 
 
+def get_dropout_rate_simple(viewpoint_cam, d_mu=0.3, verbose=True):
+    """단순 inlier 기반 dropout 계산"""
+    r_t = getattr(viewpoint_cam, "inlier_ratio", 1.0)
+    drop_rate = min(d_mu * (1.0 - r_t), 0.5)
+
+    if verbose:
+        uid = getattr(viewpoint_cam, "uid", -1)
+        print(f"[DROPOUT_SIMPLE] uid={uid}, inlier={r_t:.3f}, drop_rate={drop_rate:.3f}")
+    return drop_rate
