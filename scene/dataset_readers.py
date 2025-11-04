@@ -375,6 +375,7 @@ def readEvalSceneInfo(path, model_path, images, eval, llffhold=8):
 # train/test 나눔.
 # def readFreeSceneInfo(path, images, eval, llffhold=8):
 def readFreeSceneInfo(path, images, eval, llffhold=9):
+    print(os.path.join(path, "sparse"))
     if os.path.exists(os.path.join(path, "sparse")):
         try:
             cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")

@@ -168,6 +168,7 @@ class OptimizationParams(ParamGroup):
         self.post_iter = 10000
 
         self.s_mu = 0.3
+        self.p_mu = 0.1
         self.d_mu = 0.3
 
         self.enable_dropgaussian = False
