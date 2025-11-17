@@ -199,6 +199,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 # densification
                 
                 if iteration > opt.update_from and iteration % opt.update_interval == 0:
+                    ### initialization 단계이기 때문에 원래 adjust_anchor 사용
                     gaussians.adjust_anchor(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity, require_purning = True)
 
                     import csv
@@ -514,19 +515,8 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                         bit_trust = bit_trust_dict.get(frame_id, 0.0)
                         frame_trust = frame_trust_dict.get(frame_id, 1.0)
 
-
-                        # ❌❌❌❌ Local 에서 호준님 drop out loss 코드 있는 adjust 함수 써야함.
-                        # gaussians.adjust_anchor_heejung_song(
-                        #     check_interval=opt.update_interval,
-                        #     success_threshold=opt.success_threshold,
-                        #     grad_threshold=opt.densify_grad_threshold,
-                        #     min_opacity=opt.min_opacity,
-                        #     require_purning=False,
-                        #     frame_trust=frame_trust,   # 🌟 추가됨
-                        #     bit_trust=bit_trust,       # 🌟 추가됨
-                        #     debug=True,                 # 🌟 디버깅용 (False면 조용히 동작)
-                        #     mu=opt.s_mu,
-                        # )
+                        ## local optimization이니까 원래 adjust 함수 사용
+                        gaussians.adjust_anchor(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity, require_purning = False)
 
                         # CSV 로그 저장
                         import csv

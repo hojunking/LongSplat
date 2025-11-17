@@ -37,6 +37,10 @@ import cv2
 from scipy.optimize import least_squares
 from torch.optim.lr_scheduler import ExponentialLR
 
+# 추가) compression-aware utils 
+from utils.compression_aware_utils import load_frame_trust_metrics, compute_bit_based_trust
+from utils.dropout_weighting import get_dropout_rate, get_dropout_rate_simple
+
  
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -67,9 +71,32 @@ def reprojection_error(params, points_3d, points_2d, K):
 
 def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
     tb_writer = prepare_output_and_logger(dataset)
+
     gaussians = GaussianModel(dataset.feat_dim, dataset.n_offsets, dataset.voxel_size, dataset.update_depth, dataset.update_init_factor, dataset.update_hierachy_factor, dataset.use_feat_bank, 
                               dataset.appearance_dim, dataset.ratio, dataset.add_opacity_dist, dataset.add_cov_dist, dataset.add_color_dist)
     scene = Scene(dataset, gaussians)
+
+    scene_name = getattr(args, "scene_name", "None")
+    qp_level = getattr(args, "qp_level", "None")
+    trust_csv_path = f"/workdir/comp_log/{scene_name}_{qp_level}_trustmap.csv"
+    print('[DEBUG] trust_csv_path:', trust_csv_path)
+
+    try:
+        bit_trust_dict, avg_bit_trust = compute_bit_based_trust(
+            qp_csv=trust_csv_path,
+            max_value=0.5,
+            debug=False
+        )
+
+        frame_trust_dict, avg_importance = load_frame_trust_metrics(
+            qp_csv=trust_csv_path,
+            debug=False
+        )
+        logger.info(f"[Compression-Aware] Frame trust loaded (Type+Bits): {len(frame_trust_dict)} frames ({scene_name}, {qp_level})")
+    except Exception as e:
+        logger.warning(f"Frame trust not available ({scene_name}, {qp_level}) → default=1.0 ({e})")
+        frame_trust_dict = {}
+
     num_views = len(scene.getTrainCameras())
     start_view_id = 0
     end_view_id = 1
@@ -80,6 +107,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
     global_iter = opt.global_iter
     post_iter = opt.post_iter
     matcher = Mast3rMatcher()
+    d_mu = opt.d_mu
 
     ## initialize ##
     end_view_id = scene.init_frame_num
@@ -167,9 +195,58 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 # add statis
                 gaussians.training_statis(viewspace_point_tensor, opacity, visibility_filter, offset_selection_mask, voxel_visible_mask)
                 # densification
+                
                 if iteration > opt.update_from and iteration % opt.update_interval == 0:
-                    gaussians.adjust_anchor_song(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity, require_purning = True,
-                                                 mu = opt.s_mu)
+                    # initialization -> adjust_anchor_song 적용
+                    gaussians.adjust_anchor(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity, require_purning = True)
+
+            
+                    # CSV 로그 저장
+                    import csv
+                    import numpy as np
+                    gaussian_csv_path = os.path.join(scene.model_path, "gaussian_stats_log.csv")
+                    if not os.path.exists(gaussian_csv_path):
+                        with open(gaussian_csv_path, 'w', newline='') as f:
+                            writer = csv.writer(f)
+                            writer.writerow(["Frame_ID", "Iteration",
+                                            "Num_Gaussians", "Num_New",
+                                            "Mean_Opacity", "Std_Opacity",
+                                            "Mean_Scale", "Std_Scale"])
+
+                    render_loss_csv = os.path.join(scene.model_path, "render_loss_log.csv")
+                    if not os.path.exists(render_loss_csv):
+                        with open(render_loss_csv, "w", newline="") as f:
+                            writer = csv.writer(f)
+                            writer.writerow(["Frame_ID", "Iteration", "L1_Loss", "SSIM_Loss"])
+
+                    with open(render_loss_csv, "a", newline="") as f:
+                        writer = csv.writer(f)
+                        writer.writerow([int(viewpoint_cam.uid), int(iteration),
+                                        float(Ll1.item()), float(ssim_loss.item())])
+
+
+                    with torch.no_grad():
+                        num_gaussians = gaussians.get_anchor.shape[0]
+                        opacity_vals = gaussians.get_opacity.detach().cpu().numpy()
+                        scale_vals = gaussians.get_scaling.detach().cpu().numpy()
+                        mean_opacity = float(np.mean(opacity_vals))
+                        std_opacity  = float(np.std(opacity_vals))
+                        mean_scale   = float(np.mean(scale_vals))
+                        std_scale    = float(np.std(scale_vals))
+
+                        if not hasattr(gaussians, "_prev_gaussian_count"):
+                            gaussians._prev_gaussian_count = num_gaussians
+                        num_new = num_gaussians - gaussians._prev_gaussian_count
+                        gaussians._prev_gaussian_count = num_gaussians
+
+                    with open(gaussian_csv_path, 'a', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow([int(viewpoint_cam.uid), int(iteration),
+                                        int(num_gaussians), int(num_new),
+                                        mean_opacity, std_opacity,
+                                        mean_scale, std_scale])
+
+
             if iteration == opt.update_until:
                 del gaussians.opacity_accum
                 del gaussians.offset_gradient_accum
@@ -197,6 +274,15 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
         ema_loss_for_log = 0.0
         
         if scene.getTrainCameras()[end_view_id-1].is_registered == False:
+            import csv
+
+            # --- CSV 초기화 ---
+            keypoint_csv_path = os.path.join(scene.model_path, "keypoint_match_log.csv")
+            if not os.path.exists(keypoint_csv_path):
+                with open(keypoint_csv_path, 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Frame_ID", "Prev_Frame_ID", "Num_Keypoints", "Num_Inliers", "PnP_Success"])
+
             with torch.no_grad():
                 pre_viewpoint_cam1 = scene.getTrainCameras()[end_view_id-2]
                 viewpoint_cam = scene.getTrainCameras()[end_view_id-1]
@@ -206,7 +292,9 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 pre_rendered_depth = pre_render_pkg["depth"][0]
 
                 intrinsic_np = viewpoint_cam.intrinsic.detach().cpu().numpy()
-                viewpoint_cam.kp0, viewpoint_cam.kp1, _, _, _, _, _, _, viewpoint_cam.pre_depth_map, viewpoint_cam.depth_map = matcher._forward(pre_viewpoint_cam1.original_image, viewpoint_cam.original_image, intrinsic_np)
+
+
+                viewpoint_cam.kp0, viewpoint_cam.kp1, _, _, _, _, _, _, viewpoint_cam.pre_depth_map, viewpoint_cam.depth_map = matcher._forward(pre_viewpoint_cam1.original_image, viewpoint_cam.original_image, intrinsic_np) 
                 viewpoint_cam.conf = torch.ones(viewpoint_cam.kp0.shape[0], device=viewpoint_cam.kp0.device)
                 viewpoint_cam.kp0 = viewpoint_cam.kp0.cuda()
                 viewpoint_cam.kp1 = viewpoint_cam.kp1.cuda()
@@ -223,6 +311,32 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
 
                 success, rotation_vector, translation_vector, inliers = cv2.solvePnPRansac(pre_pts_np, kp1_np, intrinsic_np, None, iterationsCount=200,reprojectionError=5.0,confidence=0.99, flags=cv2.SOLVEPNP_ITERATIVE)
 
+
+                # [수정] keypoint/inlier csv 기록 (맵 배열 제거)
+                # Free -> 9의 배수 프레임 보정, (⚠️⚠️⚠️추가해야 하는 부분 - Tanks & Temple는 9의 배수 (하지만 Family는 3), Hike는 10의 배수)
+                def train_uid_to_real_id(t: int) -> int:
+                    # train uid(0..len(train)-1) → 실제 프레임 인덱스(0..N_total-1)
+                    # 매 8장의 train 뒤에 test(9의 배수)가 1장씩 존재했던 것을 보정
+                    return t + 1 + (t // 8)
+
+                train_uid = int(viewpoint_cam.uid)
+                prev_uid  = int(pre_viewpoint_cam1.uid)
+
+                real_frame_id      = train_uid_to_real_id(train_uid)
+                prev_real_frame_id = train_uid_to_real_id(prev_uid)
+
+                num_keypoints = int(viewpoint_cam.kp0.shape[0])
+                num_inliers   = int(len(inliers)) if inliers is not None else 0
+                pnp_success   = bool(success)
+                
+                viewpoint_cam.num_keypoints = num_keypoints
+                viewpoint_cam.num_inliers   = num_inliers
+                viewpoint_cam.inlier_ratio  = (num_inliers / (num_keypoints + 1e-6)) if num_keypoints > 0 else 1.0
+
+                with open(keypoint_csv_path, 'a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([real_frame_id, prev_real_frame_id, num_keypoints, num_inliers, pnp_success])
+
                 if success and len(inliers) >= 4:
                     pre_pts_inliers = pre_pts_np[inliers].reshape(-1, 3)
                     kp1_inliers = kp1_np[inliers].reshape(-1, 2)
@@ -235,6 +349,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                     rotation_vector = result.x[:3]
                     translation_vector = result.x[3:]
                     viewpoint_cam.is_registered = True
+
                 else:
                     print("Failed to solve PnP")
                     viewpoint_cam.is_registered = False
@@ -331,6 +446,18 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 ssim_loss = (1 - fused_ssim(image.unsqueeze(0), gt_image.unsqueeze(0)))
             else:
                 ssim_loss = (1 - ssim(image, gt_image))
+
+
+            # dropout rate 적용
+            drop_rate = get_dropout_rate_simple(viewpoint_cam, opt.d_mu, verbose=False)
+
+            if drop_rate > 0:
+                # 랜덤하게 일부 픽셀의 photometric loss를 drop
+                drop_mask = (torch.rand_like(Ll1) > drop_rate).float()
+                Ll1 = (Ll1 * drop_mask).mean()
+                drop_mask_ssim = (torch.rand_like(ssim_loss) > drop_rate).float()
+                ssim_loss = (ssim_loss * drop_mask_ssim).mean()
+
             scaling_reg = scaling.prod(dim=1).mean()
             loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01*scaling_reg
 
@@ -375,8 +502,54 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                     gaussians.training_statis(viewspace_point_tensor, opacity, visibility_filter, offset_selection_mask, voxel_visible_mask)
                     # densification
                     if iteration > opt.update_from and iteration % opt.update_interval == 0:
-                        gaussians.adjust_anchor_song(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity, require_purning = False,
-                                                     mu = opt.s_mu)
+                        # local optimization -> adjust_anchor 원래 적용
+                        gaussians.adjust_anchor(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity, require_purning = False)
+
+
+                        # CSV 로그 저장
+                        import csv
+                        import numpy as np
+                        gaussian_csv_path = os.path.join(scene.model_path, "gaussian_stats_log.csv")
+                        if not os.path.exists(gaussian_csv_path):
+                            with open(gaussian_csv_path, 'w', newline='') as f:
+                                writer = csv.writer(f)
+                                writer.writerow(["Frame_ID", "Iteration",
+                                                "Num_Gaussians", "Num_New",
+                                                "Mean_Opacity", "Std_Opacity",
+                                                "Mean_Scale", "Std_Scale"])
+                        # [추가 코드] rendering loss 로그 저장
+                        render_loss_csv = os.path.join(scene.model_path, "render_loss_log.csv")
+                        if not os.path.exists(render_loss_csv):
+                            with open(render_loss_csv, "w", newline="") as f:
+                                writer = csv.writer(f)
+                                writer.writerow(["Frame_ID", "Iteration", "L1_Loss", "SSIM_Loss"])
+
+                        with open(render_loss_csv, "a", newline="") as f:
+                            writer = csv.writer(f)
+                            writer.writerow([int(viewpoint_cam.uid), int(iteration),
+                                            float(Ll1.item()), float(ssim_loss.item())])
+
+                        with torch.no_grad():
+                            num_gaussians = gaussians.get_anchor.shape[0]
+                            opacity_vals = gaussians.get_opacity.detach().cpu().numpy()
+                            scale_vals = gaussians.get_scaling.detach().cpu().numpy()
+                            mean_opacity = float(np.mean(opacity_vals))
+                            std_opacity  = float(np.std(opacity_vals))
+                            mean_scale   = float(np.mean(scale_vals))
+                            std_scale    = float(np.std(scale_vals))
+
+                            if not hasattr(gaussians, "_prev_gaussian_count"):
+                                gaussians._prev_gaussian_count = num_gaussians
+                            num_new = num_gaussians - gaussians._prev_gaussian_count
+                            gaussians._prev_gaussian_count = num_gaussians
+
+                        with open(gaussian_csv_path, 'a', newline='') as f:
+                            writer = csv.writer(f)
+                            writer.writerow([int(viewpoint_cam.uid), int(iteration),
+                                            int(num_gaussians), int(num_new),
+                                            mean_opacity, std_opacity,
+                                            mean_scale, std_scale])
+
                 if iteration == opt.update_until:
                     del gaussians.opacity_accum
                     del gaussians.offset_gradient_accum
@@ -478,8 +651,86 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                     gaussians.training_statis(viewspace_point_tensor, opacity, visibility_filter, offset_selection_mask, voxel_visible_mask)
                     # densification
                     if iteration > opt.update_from and iteration % opt.update_interval == 0:
-                        gaussians.adjust_anchor_song(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity,
-                                                     mu = opt.s_mu)
+                        bit_trust_dict, avg_bit_trust = compute_bit_based_trust(
+                            qp_csv=trust_csv_path,
+                            max_value=0.5,
+                            debug=False
+                        )
+
+                        frame_trust_dict, avg_importance = load_frame_trust_metrics(
+                            qp_csv=trust_csv_path,
+                            debug=False
+                        )
+
+                        frame_id = int(viewpoint_cam.uid)
+
+                        bit_trust = bit_trust_dict.get(frame_id, 0.0)
+                        frame_trust = frame_trust_dict.get(frame_id, 1.0)
+
+                        baseline_init = avg_bit_trust + avg_importance
+                        print('baseline_init: ', baseline_init)
+
+
+                        # global optimization이기 때문에 adjust_anchor_ema_revise 사용
+                        gaussians.adjust_anchor_ema_revise(
+                            check_interval=opt.update_interval,
+                            success_threshold=opt.success_threshold,
+                            grad_threshold=opt.densify_grad_threshold,
+                            min_opacity=opt.min_opacity,
+                            require_purning=True,
+                            frame_trust=frame_trust,   # 🌟 추가됨
+                            bit_trust=bit_trust,       # 🌟 추가됨
+                            debug=True,                 # 🌟 디버깅용 (False면 조용히 동작)
+                            mu=opt.s_mu,                 # 🌟 추가
+                            momentum=args.trust_momentum,   # 🌟 추가
+                            baseline_init=baseline_init,  # 🌟 추가
+
+                        )
+                
+
+                        import csv
+                        import numpy as np
+                        gaussian_csv_path = os.path.join(scene.model_path, "gaussian_stats_log.csv")
+                        if not os.path.exists(gaussian_csv_path):
+                            with open(gaussian_csv_path, 'w', newline='') as f:
+                                writer = csv.writer(f)
+                                writer.writerow(["Frame_ID", "Iteration",
+                                                "Num_Gaussians", "Num_New",
+                                                "Mean_Opacity", "Std_Opacity",
+                                                "Mean_Scale", "Std_Scale"])
+
+                        render_loss_csv = os.path.join(scene.model_path, "render_loss_log.csv")
+                        if not os.path.exists(render_loss_csv):
+                            with open(render_loss_csv, "w", newline="") as f:
+                                writer = csv.writer(f)
+                                writer.writerow(["Frame_ID", "Iteration", "L1_Loss", "SSIM_Loss"])
+
+                        with open(render_loss_csv, "a", newline="") as f:
+                            writer = csv.writer(f)
+                            writer.writerow([int(viewpoint_cam.uid), int(iteration),
+                                            float(Ll1.item()), float(ssim_loss.item())])
+
+                        with torch.no_grad():
+                            num_gaussians = gaussians.get_anchor.shape[0]
+                            opacity_vals = gaussians.get_opacity.detach().cpu().numpy()
+                            scale_vals = gaussians.get_scaling.detach().cpu().numpy()
+                            mean_opacity = float(np.mean(opacity_vals))
+                            std_opacity  = float(np.std(opacity_vals))
+                            mean_scale   = float(np.mean(scale_vals))
+                            std_scale    = float(np.std(scale_vals))
+
+                            if not hasattr(gaussians, "_prev_gaussian_count"):
+                                gaussians._prev_gaussian_count = num_gaussians
+                            num_new = num_gaussians - gaussians._prev_gaussian_count
+                            gaussians._prev_gaussian_count = num_gaussians
+
+                        with open(gaussian_csv_path, 'a', newline='') as f:
+                            writer = csv.writer(f)
+                            writer.writerow([int(viewpoint_cam.uid), int(iteration),
+                                            int(num_gaussians), int(num_new),
+                                            mean_opacity, std_opacity,
+                                            mean_scale, std_scale])
+                
                 if iteration == opt.update_until:
                     del gaussians.opacity_accum
                     del gaussians.offset_gradient_accum
@@ -668,8 +919,53 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 gaussians.training_statis(viewspace_point_tensor, opacity, visibility_filter, offset_selection_mask, voxel_visible_mask)
                 # densification
                 if iteration > opt.update_from and iteration % opt.update_interval == 0:
-                    gaussians.adjust_anchor_song(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity,
-                                                 mu = opt.s_mu)
+                    # refinement 단계이기 때문에 기존 adjust_anchor 사용
+                    gaussians.adjust_anchor(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity)
+
+                    import csv
+                    import numpy as np
+                    gaussian_csv_path = os.path.join(scene.model_path, "gaussian_stats_log.csv")
+                    if not os.path.exists(gaussian_csv_path):
+                        with open(gaussian_csv_path, 'w', newline='') as f:
+                            writer = csv.writer(f)
+                            writer.writerow(["Frame_ID", "Iteration",
+                                            "Num_Gaussians", "Num_New",
+                                            "Mean_Opacity", "Std_Opacity",
+                                            "Mean_Scale", "Std_Scale"])
+
+                    render_loss_csv = os.path.join(scene.model_path, "render_loss_log.csv")
+                    if not os.path.exists(render_loss_csv):
+                        with open(render_loss_csv, "w", newline="") as f:
+                            writer = csv.writer(f)
+                            writer.writerow(["Frame_ID", "Iteration", "L1_Loss", "SSIM_Loss"])
+
+                    with open(render_loss_csv, "a", newline="") as f:
+                        writer = csv.writer(f)
+                        writer.writerow([int(viewpoint_cam.uid), int(iteration),
+                                        float(Ll1.item()), float(ssim_loss.item())])
+
+                    with torch.no_grad():
+                        num_gaussians = gaussians.get_anchor.shape[0]
+                        opacity_vals = gaussians.get_opacity.detach().cpu().numpy()
+                        scale_vals = gaussians.get_scaling.detach().cpu().numpy()
+                        mean_opacity = float(np.mean(opacity_vals))
+                        std_opacity  = float(np.std(opacity_vals))
+                        mean_scale   = float(np.mean(scale_vals))
+                        std_scale    = float(np.std(scale_vals))
+
+                        if not hasattr(gaussians, "_prev_gaussian_count"):
+                            gaussians._prev_gaussian_count = num_gaussians
+                        num_new = num_gaussians - gaussians._prev_gaussian_count
+                        gaussians._prev_gaussian_count = num_gaussians
+
+                    with open(gaussian_csv_path, 'a', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow([int(viewpoint_cam.uid), int(iteration),
+                                        int(num_gaussians), int(num_new),
+                                        mean_opacity, std_opacity,
+                                        mean_scale, std_scale])
+
+            
             if iteration == opt.update_until:
                 del gaussians.opacity_accum
                 del gaussians.offset_gradient_accum
@@ -783,6 +1079,16 @@ if __name__ == "__main__":
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[30_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--gpu", type=str, default = '-1')
+
+
+    parser.add_argument("--scene_name", type=str, default="grass", help="scene name, e.g., grass/hydrant/lab/road")
+    parser.add_argument("--qp_level", type=str, default="qp37", help="QP level, e.g., qp32/qp37")
+
+    parser.add_argument("--trust_momentum", type=float, default=0.98,
+                        help="EMA momentum for trust baseline update (default: 0.98)")
+
+
+
     args = parser.parse_args(sys.argv[1:])
 
     

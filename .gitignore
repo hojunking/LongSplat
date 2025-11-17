@@ -26,3 +26,10 @@ train_jung.py
 train_log.py
 data.zip
 data_*.zip
+results_vis
+pose-vis
+comp_log
+analyze_codes
+vis_test
+*.pt
+submodules

@@ -1,3 +1,4 @@
+# train_compgs_ema_revise 수정해서 ablation 으로 사용
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # NVIDIA CORPORATION and its licensors retain all intellectual property
@@ -76,23 +77,19 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                               dataset.appearance_dim, dataset.ratio, dataset.add_opacity_dist, dataset.add_cov_dist, dataset.add_color_dist)
     scene = Scene(dataset, gaussians)
 
-
-    # ============================================
-    # ✅ compression-aware 프레임 신뢰도 로드
-    # ============================================
     scene_name = getattr(args, "scene_name", "None")
     qp_level = getattr(args, "qp_level", "None")
     trust_csv_path = f"/workdir/comp_log/{scene_name}_{qp_level}_trustmap.csv"
     print('[DEBUG] trust_csv_path:', trust_csv_path)
 
     try:
-        bit_trust_dict = compute_bit_based_trust(
+        bit_trust_dict, avg_bit_trust = compute_bit_based_trust(
             qp_csv=trust_csv_path,
             max_value=0.5,
             debug=False
         )
 
-        frame_trust_dict = load_frame_trust_metrics(
+        frame_trust_dict, avg_importance = load_frame_trust_metrics(
             qp_csv=trust_csv_path,
             debug=False
         )
@@ -201,7 +198,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 # densification
                 
                 if iteration > opt.update_from and iteration % opt.update_interval == 0:
-                    # initialization -> adjust_anchor_song 적용
+                    # initialization -> adjust_anchor 적용
                     gaussians.adjust_anchor(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity, require_purning = True)
 
             
@@ -452,8 +449,9 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 ssim_loss = (1 - ssim(image, gt_image))
 
 
-            # dropout rate 적용
-            drop_rate = get_dropout_rate_simple(viewpoint_cam, opt.d_mu, verbose=True)
+            # 모듈 3
+            # dropout rate 적용 ################# 
+            drop_rate = get_dropout_rate_simple(viewpoint_cam, opt.d_mu, verbose=False)
 
             if drop_rate > 0:
                 # 랜덤하게 일부 픽셀의 photometric loss를 drop
@@ -461,6 +459,8 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 Ll1 = (Ll1 * drop_mask).mean()
                 drop_mask_ssim = (torch.rand_like(ssim_loss) > drop_rate).float()
                 ssim_loss = (ssim_loss * drop_mask_ssim).mean()
+            #######################################
+
 
             scaling_reg = scaling.prod(dim=1).mean()
             loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01*scaling_reg
@@ -506,32 +506,9 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                     gaussians.training_statis(viewspace_point_tensor, opacity, visibility_filter, offset_selection_mask, voxel_visible_mask)
                     # densification
                     if iteration > opt.update_from and iteration % opt.update_interval == 0:
-                        bit_trust_dict = compute_bit_based_trust(
-                            qp_csv=trust_csv_path,
-                            max_value=0.5,
-                            debug=False
-                        )
-                        frame_trust_dict = load_frame_trust_metrics(
-                            qp_csv=trust_csv_path,
-                            debug=False
-                        )
-                        frame_id = int(viewpoint_cam.uid)
+                        # local optimization -> adjust_anchor 원래 적용
+                        gaussians.adjust_anchor(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity, require_purning = False)
 
-                        bit_trust = bit_trust_dict.get(frame_id, 0.0)
-                        frame_trust = frame_trust_dict.get(frame_id, 1.0)
-
-                        # ema 적용됨.
-                        gaussians.adjust_anchor_heejung_song2(
-                            check_interval=opt.update_interval,
-                            success_threshold=opt.success_threshold,
-                            grad_threshold=opt.densify_grad_threshold,
-                            min_opacity=opt.min_opacity,
-                            require_purning=False,
-                            frame_trust=frame_trust,   # 🌟 추가됨
-                            bit_trust=bit_trust,       # 🌟 추가됨
-                            debug=True,                 # 🌟 디버깅용 (False면 조용히 동작)
-                            mu=opt.s_mu,
-                        )
 
                         # CSV 로그 저장
                         import csv
@@ -678,22 +655,28 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                     gaussians.training_statis(viewspace_point_tensor, opacity, visibility_filter, offset_selection_mask, voxel_visible_mask)
                     # densification
                     if iteration > opt.update_from and iteration % opt.update_interval == 0:
-                        bit_trust_dict = compute_bit_based_trust(
+                        bit_trust_dict, avg_bit_trust = compute_bit_based_trust(
                             qp_csv=trust_csv_path,
                             max_value=0.5,
                             debug=False
                         )
-                        frame_trust_dict = load_frame_trust_metrics(
+
+                        frame_trust_dict, avg_importance = load_frame_trust_metrics(
                             qp_csv=trust_csv_path,
                             debug=False
                         )
+
                         frame_id = int(viewpoint_cam.uid)
 
                         bit_trust = bit_trust_dict.get(frame_id, 0.0)
                         frame_trust = frame_trust_dict.get(frame_id, 1.0)
 
-                        # global optimization이기 때문에 frame_trust를 반영한 adjust_anchor_heejung_song2 사용
-                        gaussians.adjust_anchor_heejung_song2(
+                        baseline_init = avg_bit_trust + avg_importance
+                        print('baseline_init: ', baseline_init)
+
+
+                        # global optimization이기 때문에 adjust_anchor_ema_revise 사용
+                        gaussians.adjust_anchor_ema_ablation(
                             check_interval=opt.update_interval,
                             success_threshold=opt.success_threshold,
                             grad_threshold=opt.densify_grad_threshold,
@@ -703,9 +686,11 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                             bit_trust=bit_trust,       # 🌟 추가됨
                             debug=True,                 # 🌟 디버깅용 (False면 조용히 동작)
                             mu=opt.s_mu,                 # 🌟 추가
+                            momentum=args.trust_momentum,   # 🌟 추가
+                            baseline_init=baseline_init,  # 🌟 추가
+
                         )
                 
-
 
                         import csv
                         import numpy as np
@@ -1102,6 +1087,12 @@ if __name__ == "__main__":
 
     parser.add_argument("--scene_name", type=str, default="grass", help="scene name, e.g., grass/hydrant/lab/road")
     parser.add_argument("--qp_level", type=str, default="qp37", help="QP level, e.g., qp32/qp37")
+
+    parser.add_argument("--trust_momentum", type=float, default=0.98,
+                        help="EMA momentum for trust baseline update (default: 0.98)")
+
+
+
     args = parser.parse_args(sys.argv[1:])
 
     

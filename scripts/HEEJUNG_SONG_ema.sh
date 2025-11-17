@@ -2,7 +2,8 @@
 # ============================================
 # 실험 설정
 # ============================================
-SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
+# SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
+SCENES=("hydrant" "lab" "pillar" "road" "sky" "stair")
 
 QP_LEVELS=("qp37")  # QP37 먼저, QP32 나중
 COMPRESSED_DATA="/workdir/data/compress-o/free"

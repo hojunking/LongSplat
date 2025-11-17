@@ -3,7 +3,6 @@ import numpy as np
 import os
 
 # bit 
-
 def compute_bit_based_trust(qp_csv, max_value=1.0, debug=False):
     """
     [Compression-Aware] Bit-based frame trust mapping
@@ -36,18 +35,27 @@ def compute_bit_based_trust(qp_csv, max_value=1.0, debug=False):
     # min-max normalization
     min_bits = df[bit_col].min()
     max_bits = df[bit_col].max()
+
     # print('min_bits:', min_bits, 'max_bits:', max_bits)
     df["bit_trust"] = (df[bit_col] - min_bits) / (max_bits - min_bits + 1e-8)
     df["bit_trust"] = df["bit_trust"] * max_value  # 상한 스케일 적용
 
+    # 평균값
+    avg_bit_trust = df["bit_trust"].mean()
 
     if debug:
         print("\n[DEBUG] === Bit-based Trust ===")
         print(f"📊 Bits range: {min_bits:.1f} → {max_bits:.1f}")
         print(f"Max scale: {max_value}")
+        print(f"📈 Average bit_trust: {avg_bit_trust:.4f}")  # debug일 때만 출력
         print(df[["Frame_ID", bit_col, "bit_trust"]].head(10).to_string(index=False))
 
-    return df.set_index("Frame_ID")["bit_trust"].to_dict()
+    bit_trust_dict = df.set_index("Frame_ID")["bit_trust"].to_dict()
+    
+    # dict와 평균값 모두 반환
+    return bit_trust_dict, avg_bit_trust
+
+    # return df.set_index("Frame_ID")["bit_trust"].to_dict()
 
 
 # 2. QP only
@@ -89,12 +97,22 @@ def load_frame_trust_metrics(qp_csv, debug=False):
     # ✅ 안전하게 [0, 1] 범위 보정
     df_train["importance"] = df_train["importance"].clip(0.0, 1.0)
 
+    
+    avg_importance = df_train["importance"].mean()
+
     if debug:
         print("\n[DEBUG] === Frame Trust Metrics (Linear Scaled) ===")
         print(f"📊 QP range: {min_qp:.2f} → {max_qp:.2f}")
+        print(f"📈 Average importance: {avg_importance:.4f}")
         print(df_train[["Frame_ID", qp_col, "importance"]].head(10).to_string(index=False))
 
-    return df_train.set_index("Train_ID")["importance"].to_dict()
+    importance_dict = df_train.set_index("Train_ID")["importance"].to_dict()
+    
+    # dict와 평균값 모두 반환
+    return importance_dict, avg_importance
+    # return df_train.set_index("Train_ID")["importance"].to_dict()
+
+
 
 
 # ================= Pose Gradient Scaling (Inlier-based) ================= #

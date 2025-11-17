@@ -47,14 +47,15 @@ def build_global_frame_table(qp_csv, output_csv, gop_len=32, debug=False):
 # 🎬 모든 SCENE + QP 실행
 # ============================================
 if __name__ == "__main__":
-    SCENES = ["grass", "hydrant", "lab", "pillar", "road", "sky", "stair"]
+    # SCENES = ["grass", "hydrant", "lab", "pillar", "road", "sky", "stair"] # Free
+    SCENES = ["Museum"]  # TNT
     QP_LEVELS = ["qp32", "qp37"]
     
     BASE_DIR = "/workdir/comp_log"
     
     for scene in SCENES:
         for qp in QP_LEVELS:
-            qp_csv = f"{BASE_DIR}/x265_3dgs-dataset__free_dataset__free_dataset__{scene}__images_{qp}.csv"
+            qp_csv = f"{BASE_DIR}/x265_3dgs-dataset__Tanks__{scene}__images_{qp}.csv"
             output_csv = f"{BASE_DIR}/{scene}_{qp}_trustmap.csv"
             
             print(f"\n====================================")
