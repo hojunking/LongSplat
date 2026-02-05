@@ -276,6 +276,10 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     else:
         print("No GT poses available, skipping pose metrics evaluation")
 
+
+
+
+
     t = np.array(t_list[5:])
     fps = 1.0 / t.mean()
     print(f'Test FPS: \033[1;35m{fps:.5f}\033[0m')
@@ -364,7 +368,35 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
                                   dataset.add_opacity_dist, dataset.add_cov_dist, dataset.add_color_dist)
         dataset.load_pose = True
         scene = Scene(dataset, gaussians, load_iteration=iteration)
+
         gaussians.eval()
+
+
+        # =====================================================
+        # 🔍 GT pose 디버깅 코드 (추가 위치 여기!)
+        print("===== DEBUG: Checking GT Pose Loading =====")
+
+        for i, v in enumerate(scene.getTrainCameras()):
+            print(f"[Train {i:03d}] name={v.image_name}")
+            print(f"  T_gt: {None if v.T_gt is None else 'Loaded'}")
+            print(f"  R_gt: {None if v.R_gt is None else 'Loaded'}")
+            if hasattr(v, "pose_source"):
+                print(f"  pose_source: {v.pose_source}")
+            else:
+                print("  pose_source: (unknown)")
+
+        for i, v in enumerate(scene.getTestCameras()):
+            print(f"[Test {i:03d}] name={v.image_name}")
+            print(f"  T_gt: {None if v.T_gt is None else 'Loaded'}")
+            print(f"  R_gt: {None if v.R_gt is None else 'Loaded'}")
+            if hasattr(v, "pose_source"):
+                print(f"  pose_source: {v.pose_source}")
+            else:
+                print("  pose_source: (unknown)")
+
+        print("===== END DEBUG =====")
+        # =====================================================
+
 
         bg_color = [1,1,1] if dataset.white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")

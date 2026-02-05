@@ -2,24 +2,21 @@
 # ============================================
 # 실험 설정
 # ============================================
-# SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
 
-# family따로돌리기
- SCENES=("Ballroom" "Barn" "Church" "Francis" "Horse" "Ignatius" "Museum")
-#SCENES=("Family")
+SCENES=("Family" "Church" "Barn" "Museum" "Horse" "Ballroom" "Francis" "Ignatius")
 
-QP_LEVELS=("qp37")  # QP37 먼저, QP32 나중
+QP_LEVELS=("qp27")  # QP37 먼저, QP32 나중
 COMPRESSED_DATA="/workdir/data/compress-o/tnt"
 ORIGINAL_DATA="/workdir/data/compress-x/tnt"
-OUTPUT_BASE="outputs/tnt"
-SHEET_NAME="PC2"
+OUTPUT_BASE="outputs/tnt_qp27_freemode_rx"
+SHEET_NAME="rebuttal"
 
 # ============================================
 # 루프 시작
 # ============================================
 for SCENE in "${SCENES[@]}"; do
   for QP in "${QP_LEVELS[@]}"; do
-    SCENE_QP="${SCENE}_${QP}_compgs_mom095_4nd"
+    SCENE_QP="${SCENE}_${QP}_compgs"
     COMP_PATH="${COMPRESSED_DATA}/${QP}/${SCENE}"
     MODEL_PATH="${OUTPUT_BASE}/${SCENE_QP}"
 
@@ -30,10 +27,10 @@ for SCENE in "${SCENES[@]}"; do
     # 1️⃣ Training 
     echo ""
     echo "🔵 [1/3] Training with ${QP} images..."
-    python train_compgs_ema_revise_family.py --eval \
+    python train_compgs_ema_revise.py --eval \
         -s ${COMP_PATH} \
         -m ${MODEL_PATH} \
-        --mode tanks \
+        --mode free \
         --d_mu 0.5  \
         --port $((12345 + RANDOM % 1000)) \
         --scene_name ${SCENE} \

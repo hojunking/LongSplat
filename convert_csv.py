@@ -47,16 +47,19 @@ def build_global_frame_table(qp_csv, output_csv, gop_len=32, debug=False):
 # 🎬 모든 SCENE + QP 실행
 # ============================================
 if __name__ == "__main__":
-    # SCENES = ["grass", "hydrant", "lab", "pillar", "road", "sky", "stair"] # Free
-    SCENES = ["Museum"]  # TNT
-    QP_LEVELS = ["qp32", "qp37"]
+    #SCENES = ["grass", "hydrant", "lab", "pillar", "road", "sky", "stair"] # Free
+    #SCENES = ["grass"]  # TNT
+    SCENES = ["scene0000_02", "scene0002_00", "scene0024_00", "scene0517_01", "scene0554_01"]
+
+    QP_LEVELS = ["QP17"]
     
-    BASE_DIR = "/workdir/comp_log"
+    BASE_DIR = "/workdir/comp_log/scannet"
     
     for scene in SCENES:
         for qp in QP_LEVELS:
-            qp_csv = f"{BASE_DIR}/x265_3dgs-dataset__Tanks__{scene}__images_{qp}.csv"
-            output_csv = f"{BASE_DIR}/{scene}_{qp}_trustmap.csv"
+            # qp_csv = f"{BASE_DIR}/x265_3dgs-dataset__Tanks__{scene}__images_{qp}.csv"
+            qp_csv = f"{BASE_DIR}/{scene}_x265_{qp}_with_tld.csv"
+            output_csv = f"{BASE_DIR}/{scene}_qp17_trustmap.csv"
             
             print(f"\n====================================")
             print(f"📂 Processing: {scene} ({qp})")
@@ -68,3 +71,57 @@ if __name__ == "__main__":
                 build_global_frame_table(qp_csv, output_csv, debug=False)
             except Exception as e:
                 print(f"❌ Error processing {scene} ({qp}): {e}")
+
+
+
+
+#  SCENES=("Ballroom" "Barn" "Church" "Francis" "Horse" "Ignatius" "Museum")
+# ============================================
+# 🎬 단일 파일 처리
+# ============================================
+# if __name__ == "__main__":
+#     scene = "Family"
+    
+    
+#     qp_csv = f"temp/Tanks/{scene}/images/{scene}_x265_QP27_with_tld.csv"
+#     output_csv = f"comp_log/Tanks/{scene}_qp27_trustmap.csv"
+    
+#     print(f"\n====================================")
+#     print(f"📂 Processing single file")
+#     print(f"Input:  {qp_csv}")
+#     print(f"Output: {output_csv}")
+#     print(f"====================================")
+    
+#     try:
+#         build_global_frame_table(qp_csv, output_csv, debug=False)
+#     except Exception as e:
+#         print(f"❌ Error processing file: {e}")
+    
+#     qp_csv = f"temp/Tanks/{scene}/images/{scene}_x265_QP42_with_tld.csv"
+#     output_csv = f"comp_log/Tanks/{scene}_qp42_trustmap.csv"
+    
+#     print(f"\n====================================")
+#     print(f"📂 Processing single file")
+#     print(f"Input:  {qp_csv}")
+#     print(f"Output: {output_csv}")
+#     print(f"====================================")
+    
+#     try:
+#         build_global_frame_table(qp_csv, output_csv, debug=False)
+#     except Exception as e:
+#         print(f"❌ Error processing file: {e}")
+
+
+#     qp_csv = f"temp/Tanks/{scene}/images/{scene}_x265_QP47_with_tld.csv"
+#     output_csv = f"comp_log/Tanks/{scene}_qp47_trustmap.csv"
+    
+#     print(f"\n====================================")
+#     print(f"📂 Processing single file")
+#     print(f"Input:  {qp_csv}")
+#     print(f"Output: {output_csv}")
+#     print(f"====================================")
+    
+#     try:
+#         build_global_frame_table(qp_csv, output_csv, debug=False)
+#     except Exception as e:
+#         print(f"❌ Error processing file: {e}")

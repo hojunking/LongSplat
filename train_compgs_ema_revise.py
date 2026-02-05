@@ -36,6 +36,7 @@ from utils.mast3r_utils import Mast3rMatcher
 import cv2
 from scipy.optimize import least_squares
 from torch.optim.lr_scheduler import ExponentialLR
+import time
 
 # 추가) compression-aware utils 
 from utils.compression_aware_utils import load_frame_trust_metrics, compute_bit_based_trust
@@ -100,6 +101,8 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
     num_views = len(scene.getTrainCameras())
     start_view_id = 0
     end_view_id = 1
+    num_frames = 0
+    start_time = time.time()
 
     init_iteraion = opt.init_iteraion
     pose_iteration = opt.pose_iteration
@@ -141,6 +144,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
         
         voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe,background)
         render_pkg = render(viewpoint_cam, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=True)
+        num_frames += 1
         
         image, viewspace_point_tensor, visibility_filter, offset_selection_mask, radii, scaling, opacity = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["selection_mask"], render_pkg["radii"], render_pkg["scaling"], render_pkg["neural_opacity"]
         rendered_depth = render_pkg["depth"][0]
@@ -289,6 +293,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
 
                 voxel_visible_mask = prefilter_voxel(pre_viewpoint_cam1, gaussians, pipe,background)
                 pre_render_pkg = render(pre_viewpoint_cam1, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=False)
+                num_frames += 1
                 pre_rendered_depth = pre_render_pkg["depth"][0]
 
                 intrinsic_np = viewpoint_cam.intrinsic.detach().cpu().numpy()
@@ -372,6 +377,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             for iteration in range(pose_iteration):
                 voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe, background)
                 render_pkg = render(viewpoint_cam, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=True)
+                num_frames += 1
                 image = render_pkg["render"]
                 rendered_depth = render_pkg["depth"][0]
                 occ_mask = get_occlusion_mask(viewpoint_cam=pre_viewpoint_cam1, viewpoint_cam2=viewpoint_cam, depth=pre_rendered_depth, device=pre_rendered_depth.device, thresh=0.001).detach()
@@ -435,6 +441,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe, background)
             retain_grad = (iteration < opt.update_until and iteration >= 0)
             render_pkg = render(viewpoint_cam, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=retain_grad)
+            num_frames += 1
             
             image, viewspace_point_tensor, visibility_filter, offset_selection_mask, radii, scaling, opacity = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["selection_mask"], render_pkg["radii"], render_pkg["scaling"], render_pkg["neural_opacity"]
             rendered_depth = render_pkg["depth"][0]
@@ -596,6 +603,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe,background)
             retain_grad = (iteration < opt.update_until and iteration >= 0)
             render_pkg = render(viewpoint_cam, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=retain_grad)
+            num_frames += 1
             
             image, viewspace_point_tensor, visibility_filter, offset_selection_mask, radii, scaling, opacity = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["selection_mask"], render_pkg["radii"], render_pkg["scaling"], render_pkg["neural_opacity"]
             rendered_depth = render_pkg["depth"][0]
@@ -754,6 +762,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 end_visible_mask = prefilter_voxel(end_viewpoint_cam, gaussians, pipe, background)
                 render_pkg = render(end_viewpoint_cam, gaussians, pipe, background,
                                     visible_mask=end_visible_mask, retain_grad=False)
+                num_frames += 1
                 offset_selection_mask = render_pkg["selection_mask"]
                 end_n_touched = (render_pkg["n_touched"] > 0)
                 
@@ -772,6 +781,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                     start_visible_mask = prefilter_voxel(start_viewpoint_cam, gaussians, pipe, background)
                     render_pkg = render(start_viewpoint_cam, gaussians, pipe, background,
                                         visible_mask=start_visible_mask, retain_grad=False)
+                    num_frames += 1
                     offset_selection_mask = render_pkg["selection_mask"]
                     start_n_touched = (render_pkg["n_touched"] > 0)
                     
@@ -807,6 +817,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             for view in scene.getTrainCameras()[0:end_view_id]:
                 voxel_visible_mask = prefilter_voxel(view, gaussians, pipe, background)
                 render_pkg = render(view, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=False)
+                num_frames += 1
                 n_touched = render_pkg["n_touched"]
                 offset_selection_mask = render_pkg["selection_mask"]
                 visible_mask_expand = voxel_visible_mask.unsqueeze(0).expand(gaussians.n_offsets, -1).reshape(-1)
@@ -863,6 +874,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
         voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe,background)
         retain_grad = (iteration < opt.update_until and iteration >= 0)
         render_pkg = render(viewpoint_cam, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=retain_grad)
+        num_frames += 1
         
         image, viewspace_point_tensor, visibility_filter, offset_selection_mask, radii, scaling, opacity = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["selection_mask"], render_pkg["radii"], render_pkg["scaling"], render_pkg["neural_opacity"]
         rendered_depth = render_pkg["depth"][0]
@@ -980,6 +992,11 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 gaussians.pose_optimizer.zero_grad(set_to_none = True)
                 update_pose(viewpoint_cam)
 
+
+    elapsed = time.time() - start_time
+    fps = num_frames / elapsed if elapsed > 0 else 0.0
+    logger.info(f"[TRAIN STATS] total_time={elapsed:.2f}s, frames={num_frames}, FPS={fps:.2f}")
+    print(f"[TRAIN STATS] total_time={elapsed:.2f}s, frames={num_frames}, FPS={fps:.2f}")
 
     logger.info("\n[ITER {}] Saving Gaussians".format(iteration))
     scene.save(iteration)

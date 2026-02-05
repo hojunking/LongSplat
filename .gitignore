@@ -32,4 +32,5 @@ comp_log
 analyze_codes
 vis_test
 *.pt
-submodules
+temp
+*.mp4

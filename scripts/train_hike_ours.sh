@@ -4,11 +4,13 @@
 # 실험 설정
 # ============================================
 
-SCENES_HIKE=("forest1" "forest2" "forest3" "garden1" "garden2" "garden3" "indoor" "playground" "university1" "university2" "university3" "university4")
+# SCENES_HIKE=("forest1" "forest2" "forest3" "garden1" "garden2" "garden3" "indoor" "playground" "university1" "university2" "university3" "university4")
+# SCENES_HIKE=( "playground" "university1" "university2" "university3" "university4")
+SCENES_HIKE=("garden2")
 
 DATA_COMP_O="./data/compress-o/hike/qp37_half"   # 입력 (압축된 qp37_half)
 DATA_ORIG="./data/compress-x/hike_half"         # 원본 이미지 경로
-OUTPUT_BASE="./outputs/hike/compressed"          # 모델 저장 base
+OUTPUT_BASE="./outputs/hike/compressed_ours"          # 모델 저장 base
 QP_TAG="qp37"                                   # 태그용
 SHEET_NAME="supple"                             # ✅ 구글 시트 이름 (원하는 이름으로 바꿔도 됨)
 
