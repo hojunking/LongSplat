@@ -1,23 +1,25 @@
 # ============================================
 # 실험 설정
 # ============================================
+# SCENES=("Family" "Church" "Barn" "Museum" "Horse" "Ballroom" "Francis" "Ignatius")
+SCENES=("Church" "Barn" "Museum" "Horse" "Ballroom" "Francis" "Ignatius")
+# SCENES=( "Francis")
 
-SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
-
-
-QP_LEVELS=("qp27" "qp47")
-COMPRESSED_DATA="/workdir/data/compress-o/free"
-ORIGINAL_DATA="/workdir/data/compress-x/free"
+# QP_LEVELS=("qp27")
+QP_LEVELS=("qp47")
+COMPRESSED_DATA="/workdir/data/compress-o/tnt/"
+ORIGINAL_DATA="/workdir/data/compress-x/tnt"
 OUTPUT_BASE=""
 SHEET_NAME="rebuttal"
 
+# 실행하기 전에 로그 파일 있는지 확인 필요!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # ============================================
 # 루프 시작
 # ============================================
 for SCENE in "${SCENES[@]}"; do
   for QP in "${QP_LEVELS[@]}"; do
-    OUTPUT_BASE="outputs/free_${QP}_baseline"
-    SCENE_QP="${SCENE}_${QP}_baseline"
+    OUTPUT_BASE="outputs/tnt_${QP}_ours_R1"  ##################라벨 수정 필요!!!!!!!!!!!!!!!!!!!!!!!!!!
+    SCENE_QP="${SCENE}_${QP}_ours" 
     COMP_PATH="${COMPRESSED_DATA}/${QP}/${SCENE}"
     MODEL_PATH="${OUTPUT_BASE}/${SCENE_QP}"
 
@@ -28,12 +30,16 @@ for SCENE in "${SCENES[@]}"; do
     # 1️⃣ Training 
     echo ""
     echo "🔵 [1/3] Training with ${QP} images..."
-    python train.py --eval \
+    python train_compgs_ema_revise.py --eval \
         -s ${COMP_PATH} \
         -m ${MODEL_PATH} \
-        -r 2 \
-        --mode free \
-        --port $((12345 + RANDOM % 1000))
+        -r 1 \
+        --mode tanks \
+        --d_mu 0.5  \
+        --port $((12345 + RANDOM % 1000)) \
+        --scene_name ${SCENE} \
+        --qp_level ${QP}  \
+        --trust_momentum 0.95
     
     [ $? -ne 0 ] && echo "❌ Training failed for ${SCENE_QP}, skipping..." && continue
 

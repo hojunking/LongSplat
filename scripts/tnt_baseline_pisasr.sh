@@ -1,14 +1,15 @@
-# ============================================
-# 실험 설정
-# ============================================
+#============================================
+#실험 설정
+#============================================
+SCENES=("Museum" )
+#SCENES=("Family" "Church" "Barn" "Museum" "Horse" "Ballroom" "Francis" "Ignatius")
+#SCENES=("Family") #"Church" "Barn" "Museum" "Horse" "Ballroom" "Francis" "Ignatius")
 
-SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
 
-
-QP_LEVELS=("qp27" "qp47")
-COMPRESSED_DATA="/workdir/data/compress-o/free"
-ORIGINAL_DATA="/workdir/data/compress-x/free"
-OUTPUT_BASE=""
+QP_LEVELS=("qp37")
+COMPRESSED_DATA="/workdir/data/compress-o/tnt/pisaSR"
+ORIGINAL_DATA="/workdir/data/compress-x/tnt"
+OUTPUT_BASE="outputs/tnt_qp37_pisaSR"
 SHEET_NAME="rebuttal"
 
 # ============================================
@@ -16,8 +17,7 @@ SHEET_NAME="rebuttal"
 # ============================================
 for SCENE in "${SCENES[@]}"; do
   for QP in "${QP_LEVELS[@]}"; do
-    OUTPUT_BASE="outputs/free_${QP}_baseline"
-    SCENE_QP="${SCENE}_${QP}_baseline"
+    SCENE_QP="${SCENE}_${QP}_pisaSR"
     COMP_PATH="${COMPRESSED_DATA}/${QP}/${SCENE}"
     MODEL_PATH="${OUTPUT_BASE}/${SCENE_QP}"
 
@@ -31,7 +31,6 @@ for SCENE in "${SCENES[@]}"; do
     python train.py --eval \
         -s ${COMP_PATH} \
         -m ${MODEL_PATH} \
-        -r 2 \
         --mode free \
         --port $((12345 + RANDOM % 1000))
     
@@ -73,3 +72,4 @@ for SCENE in "${SCENES[@]}"; do
     echo "------------------------------------------"
   done
 done
+

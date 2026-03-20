@@ -2,14 +2,14 @@
 # ============================================
 # 실험 설정
 # ============================================
-# SCENES=("IMG_0405" "IMG_0406")
-SCENES=("IMG_0406")
+SCENES=("IMG_0405" "IMG_0406")
+# SCENES=("IMG_0406")
 # SCENES=("IMG_0406")
 
 QP_LEVELS=("QP37")  # QP37 먼저, QP32 나중
 COMPRESSED_DATA="/workdir/data/compo-youtube"
 ORIGINAL_DATA="/workdir/data/compx-youtube"
-OUTPUT_BASE="outputs/realworld_ours"
+OUTPUT_BASE="outputs/realworld_ours_260205_t4"
 SHEET_NAME="PC2"
 
 # ============================================
@@ -29,15 +29,15 @@ for SCENE in "${SCENES[@]}"; do
     # 1️⃣ Training 
     echo ""
     echo "🔵 [1/3] Training with ${QP} images..."
-    # python train_compgs_ema_revise.py --eval \
-    #     -s ${COMP_PATH} \
-    #     -m ${MODEL_PATH}_compgs_mom095_dmu01 \
-    #     -r 4 --mode custom \
-    #     --d_mu 0.1  \
-    #     --port $((12345 + RANDOM % 1000)) \
-    #     --scene_name ${SCENE} \
-    #     --qp_level ${QP}  \
-    #     --trust_momentum 0.95
+    python train_compgs_ema_revise.py --eval \
+        -s ${COMP_PATH} \
+        -m ${MODEL_PATH}_compgs_mom095_dmu05 \
+        -r 4 --mode custom \
+        --d_mu 0.1  \
+        --port $((12345 + RANDOM % 1000)) \
+        --scene_name ${SCENE} \
+        --qp_level ${QP}  \
+        --trust_momentum 0.95
 
     # python train_compgs_ema_revise.py --eval \
     #     -s ${COMP_PATH} \
@@ -57,7 +57,7 @@ for SCENE in "${SCENES[@]}"; do
     echo ""
     echo "🟢 [2/3] Rendering ${SCENE_QP}..."
     python render.py \
-        -m ${MODEL_PATH}_compgs_mom095_dmu01 \
+        -m ${MODEL_PATH}_compgs_mom095_dmu05 \
         --original_images_path ${ORIGINAL_DATA}/${SCENE}_frames/images
 
     [ $? -ne 0 ] && echo "❌ Rendering failed for ${SCENE_QP}, skipping..." && continue
@@ -65,7 +65,7 @@ for SCENE in "${SCENES[@]}"; do
     # 3️⃣ Metrics
     echo ""
     echo "🟣 [3/3] Evaluating metrics for ${SCENE_QP}..."
-    python metrics.py -m ${MODEL_PATH}_compgs_mom095_dmu01
+    python metrics.py -m ${MODEL_PATH}_compgs_mom095_dmu05
 
     [ $? -ne 0 ] && echo "❌ Metrics failed for ${SCENE_QP}, skipping..." && continue
 

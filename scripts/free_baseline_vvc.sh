@@ -2,11 +2,14 @@
 # 실험 설정
 # ============================================
 
-SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
+# SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
+SCENES=("stair")
+# SCENES=("sky")
 
 
 QP_LEVELS=("qp27" "qp47")
-COMPRESSED_DATA="/workdir/data/compress-o/free"
+# QP_LEVELS=("qp47")
+COMPRESSED_DATA="/workdir/data/compress-o/vtm_output_free_qp27_47/jpg_fixed/free_dataset"
 ORIGINAL_DATA="/workdir/data/compress-x/free"
 OUTPUT_BASE=""
 SHEET_NAME="rebuttal"
@@ -16,7 +19,7 @@ SHEET_NAME="rebuttal"
 # ============================================
 for SCENE in "${SCENES[@]}"; do
   for QP in "${QP_LEVELS[@]}"; do
-    OUTPUT_BASE="outputs/free_${QP}_baseline"
+    OUTPUT_BASE="outputs/free_${QP}_vvc_baseline"
     SCENE_QP="${SCENE}_${QP}_baseline"
     COMP_PATH="${COMPRESSED_DATA}/${QP}/${SCENE}"
     MODEL_PATH="${OUTPUT_BASE}/${SCENE_QP}"

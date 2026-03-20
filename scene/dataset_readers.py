@@ -414,41 +414,6 @@ def readFreeSceneInfo(path, images, eval, llffhold=9):
         print(f"  → Train indices: {list(range(len(cam_infos)))}")
         print("  → Test indices : []\n")
 
-    # 수정된 Train/Test Split 
-    # if eval:
-    #     test_indices = set()
-    #     train_indices = set()
-        
-    #     # Train: 4 배수들 
-    #     for idx in range(0, len(cam_infos), 4):
-    #         train_indices.add(idx)
-        
-    #     # Test: llffhold(7) 간격으로 선택
-    #     for idx in range(0, len(cam_infos), llffhold):
-    #         # 0이거나 4과 7의 공배수(LCM=224)인 경우
-    #         if idx == 0 or (idx % 4 == 0 and idx % llffhold == 0):
-    #             # 다음 프레임을 test로
-    #             if idx + 1 < len(cam_infos):
-    #                 test_indices.add(idx + 1)
-    #                 print(f"  🔄 Frame {idx} (0 or LCM of 4 and {llffhold}) → test as frame {idx + 1}")
-    #         else:
-    #             # 그대로 test로
-    #             test_indices.add(idx)
-        
-    #     print(f"📊 llffhold = {llffhold}")
-    #     print(f"📍 Total train frames: {len(train_indices)}")
-    #     print(f"📍 Total test frames: {len(test_indices)}")
-    #     print(f"📍 Train indices (multiples of 4): {sorted(train_indices)[:20]}")
-    #     print(f"📍 Test indices: {sorted(test_indices)[:20]}")
-        
-    #     # Train/Test 분리
-    #     train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in train_indices]
-    #     test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in test_indices]
-    # else:
-    #     train_cam_infos = cam_infos
-    #     test_cam_infos = []
-    # 수정 끝
-
     nerf_normalization = None
 
     ply_path = os.path.join(path, "sparse/0/points3D.ply")

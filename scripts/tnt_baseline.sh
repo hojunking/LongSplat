@@ -1,13 +1,14 @@
-# ============================================
-# 실험 설정
-# ============================================
+#============================================
+#실험 설정
+#============================================
+SCENES=("Family" )
+# SCENES=("Family" "Church" "Barn" "Museum" "Horse" "Ballroom" "Francis" "Ignatius")
 
-SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
 
-
-QP_LEVELS=("qp27" "qp47")
-COMPRESSED_DATA="/workdir/data/compress-o/free"
-ORIGINAL_DATA="/workdir/data/compress-x/free"
+# QP_LEVELS=("qp27" "qp47")
+QP_LEVELS=("qp27")
+COMPRESSED_DATA="/workdir/data/compress-o/tnt/"
+ORIGINAL_DATA="/workdir/data/compress-x/tnt"
 OUTPUT_BASE=""
 SHEET_NAME="rebuttal"
 
@@ -16,7 +17,7 @@ SHEET_NAME="rebuttal"
 # ============================================
 for SCENE in "${SCENES[@]}"; do
   for QP in "${QP_LEVELS[@]}"; do
-    OUTPUT_BASE="outputs/free_${QP}_baseline"
+    OUTPUT_BASE="outputs/tnt_${QP}_baseline_0313"
     SCENE_QP="${SCENE}_${QP}_baseline"
     COMP_PATH="${COMPRESSED_DATA}/${QP}/${SCENE}"
     MODEL_PATH="${OUTPUT_BASE}/${SCENE_QP}"
@@ -31,8 +32,9 @@ for SCENE in "${SCENES[@]}"; do
     python train.py --eval \
         -s ${COMP_PATH} \
         -m ${MODEL_PATH} \
-        -r 2 \
+        # --mode tanks \
         --mode free \
+        # -r 1 \
         --port $((12345 + RANDOM % 1000))
     
     [ $? -ne 0 ] && echo "❌ Training failed for ${SCENE_QP}, skipping..." && continue
@@ -73,3 +75,4 @@ for SCENE in "${SCENES[@]}"; do
     echo "------------------------------------------"
   done
 done
+

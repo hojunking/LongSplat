@@ -1,24 +1,23 @@
+#!/bin/bash
 # ============================================
 # 실험 설정
 # ============================================
+SCENES=("IMG_0405" "IMG_0406")
+# SCENES=("IMG_0405")
 
-SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
-
-
-QP_LEVELS=("qp27" "qp47")
-COMPRESSED_DATA="/workdir/data/compress-o/free"
-ORIGINAL_DATA="/workdir/data/compress-x/free"
-OUTPUT_BASE=""
-SHEET_NAME="rebuttal"
+QP_LEVELS=("QP37")  # QP37 먼저, QP32 나중
+COMPRESSED_DATA="/workdir/data/compo-youtube"
+ORIGINAL_DATA="/workdir/data/compx-youtube"
+OUTPUT_BASE="outputs/realworld_baseline_260205_t4"
+SHEET_NAME="PC2"
 
 # ============================================
 # 루프 시작
 # ============================================
 for SCENE in "${SCENES[@]}"; do
   for QP in "${QP_LEVELS[@]}"; do
-    OUTPUT_BASE="outputs/free_${QP}_baseline"
-    SCENE_QP="${SCENE}_${QP}_baseline"
-    COMP_PATH="${COMPRESSED_DATA}/${QP}/${SCENE}"
+    SCENE_QP="${SCENE}_${QP}"
+    COMP_PATH="${COMPRESSED_DATA}/${SCENE}/${QP}"
     MODEL_PATH="${OUTPUT_BASE}/${SCENE_QP}"
 
     echo "=========================================="
@@ -31,10 +30,10 @@ for SCENE in "${SCENES[@]}"; do
     python train.py --eval \
         -s ${COMP_PATH} \
         -m ${MODEL_PATH} \
-        -r 2 \
-        --mode free \
-        --port $((12345 + RANDOM % 1000))
-    
+        -r 4 --mode custom \
+        --port $((12345 + RANDOM % 1000)) 
+
+
     [ $? -ne 0 ] && echo "❌ Training failed for ${SCENE_QP}, skipping..." && continue
 
     # 2️⃣ Rendering
@@ -42,7 +41,7 @@ for SCENE in "${SCENES[@]}"; do
     echo "🟢 [2/3] Rendering ${SCENE_QP}..."
     python render.py \
         -m ${MODEL_PATH} \
-        --original_images_path ${ORIGINAL_DATA}/${SCENE}/images
+        --original_images_path ${ORIGINAL_DATA}/${SCENE}_frames/images
 
     [ $? -ne 0 ] && echo "❌ Rendering failed for ${SCENE_QP}, skipping..." && continue
 

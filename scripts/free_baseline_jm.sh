@@ -4,13 +4,14 @@
 #SCENES=("Ballroom" "Barn" "Church" "Francis" "Horse" "Ignatius" "Museum" "Family")
 #SCENES=("Family" "Church" "Barn" "Museum" "Horse" "Ballroom" "Francis" "Ignatius")
 #SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
-SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
+SCENES=("sky" "stair")
 
 
-QP_LEVELS=("qp22")
+# QP_LEVELS=("qp27" "qp47")
+QP_LEVELS=("qp47")
 COMPRESSED_DATA="/workdir/data/compress-o/free/jm"
 ORIGINAL_DATA="/workdir/data/compress-x/free"
-OUTPUT_BASE="outputs/free_jm_baseline_t3"
+OUTPUT_BASE="outputs/free_jm_baseline_t4"
 SHEET_NAME="rebuttal"
 
 # ============================================

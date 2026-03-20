@@ -83,12 +83,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
     print('[DEBUG] trust_csv_path:', trust_csv_path)
 
     try:
-        bit_trust_dict, avg_bit_trust = compute_bit_based_trust(
-            qp_csv=trust_csv_path,
-            max_value=0.5,
-            debug=False
-        )
-
         frame_trust_dict, avg_importance = load_frame_trust_metrics(
             qp_csv=trust_csv_path,
             debug=False
@@ -659,11 +653,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                     gaussians.training_statis(viewspace_point_tensor, opacity, visibility_filter, offset_selection_mask, voxel_visible_mask)
                     # densification
                     if iteration > opt.update_from and iteration % opt.update_interval == 0:
-                        bit_trust_dict, avg_bit_trust = compute_bit_based_trust(
-                            qp_csv=trust_csv_path,
-                            max_value=0.5,
-                            debug=False
-                        )
 
                         frame_trust_dict, avg_importance = load_frame_trust_metrics(
                             qp_csv=trust_csv_path,
@@ -672,10 +661,9 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
 
                         frame_id = int(viewpoint_cam.uid)
 
-                        bit_trust = bit_trust_dict.get(frame_id, 0.0)
                         frame_trust = frame_trust_dict.get(frame_id, 1.0)
 
-                        baseline_init = avg_bit_trust + avg_importance
+                        baseline_init = avg_importance
                         print('baseline_init: ', baseline_init)
 
 
@@ -687,7 +675,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                             min_opacity=opt.min_opacity,
                             require_purning=True,
                             frame_trust=frame_trust,   # 🌟 추가됨
-                            bit_trust=bit_trust,       # 🌟 추가됨
+                            bit_trust=0,       # 🌟 추가됨
                             debug=True,                 # 🌟 디버깅용 (False면 조용히 동작)
                             mu=opt.s_mu,                 # 🌟 추가
                             momentum=args.trust_momentum,   # 🌟 추가
@@ -1098,10 +1086,10 @@ if __name__ == "__main__":
     parser.add_argument("--gpu", type=str, default = '-1')
 
 
-    parser.add_argument("--scene_name", type=str, help="scene name, e.g., grass/hydrant/lab/road")
-    parser.add_argument("--qp_level", type=str, help="QP level, e.g., qp32/qp37")
+    parser.add_argument("--scene_name", type=str, default="grass", help="scene name, e.g., grass/hydrant/lab/road")
+    parser.add_argument("--qp_level", type=str, default="qp37", help="QP level, e.g., qp32/qp37")
 
-    parser.add_argument("--trust_momentum", type=float, default=0.95,
+    parser.add_argument("--trust_momentum", type=float, default=0.98,
                         help="EMA momentum for trust baseline update (default: 0.98)")
 
 

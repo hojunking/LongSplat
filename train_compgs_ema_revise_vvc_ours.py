@@ -70,6 +70,8 @@ def reprojection_error(params, points_3d, points_2d, K):
     return residuals.flatten()
 
 
+import os
+
 def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
     tb_writer = prepare_output_and_logger(dataset)
 
@@ -79,8 +81,17 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
 
     scene_name = getattr(args, "scene_name", "None")
     qp_level = getattr(args, "qp_level", "None")
-    trust_csv_path = f"/workdir/comp_log/{scene_name}_{qp_level}_trustmap.csv"
+    trust_csv_path = f"/workdir/comp_log/{scene_name}_{qp_level}_vvc_trustmap.csv"
+
     print('[DEBUG] trust_csv_path:', trust_csv_path)
+
+    # ❗ CSV 없으면 학습 중단
+    if not os.path.exists(trust_csv_path):
+        raise FileNotFoundError(
+            f"\n[ERROR] Trustmap CSV not found!\n"
+            f"Expected file: {trust_csv_path}\n"
+            f"Please generate the trustmap before training.\n"
+        )
 
     try:
         bit_trust_dict, avg_bit_trust = compute_bit_based_trust(
