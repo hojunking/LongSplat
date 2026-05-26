@@ -15,7 +15,9 @@ function rand(){
 ulimit -n 4096
 port=$(rand 10000 30000)
 #scene=("Ballroom" "Barn" "Church" "Family" "Francis" "Horse" "Ignatius")
-scene=("Family")
+
+scene=("Museum" "Church")
+# scene=("Family")
 
 # "Museum"
 SHEET_NAME="gspread"
@@ -23,7 +25,7 @@ for scene in "${scene[@]}"; do
     SAVE_PATH="outputs/tanks/compress-x/$scene/"
     
     python train.py --eval -s "./data/compress-x/tnt/$scene" -m "$SAVE_PATH" --port $port --mode free
-    python render.py -m "$SAVE_PATH"
+    python render.py -m "$SAVE_PATH" --original_images_path "/workdir/data/compress-x/tnt/${scene}/images"
     python metrics.py -m "$SAVE_PATH"
     
     # gspread 부분 추가

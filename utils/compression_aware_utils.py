@@ -21,6 +21,13 @@ def compute_bit_based_trust(qp_csv, max_value=1.0, debug=False):
         raise FileNotFoundError(f"❌ QP CSV not found: {qp_csv}")
 
     df = pd.read_csv(qp_csv)
+    
+    # 추가
+    df.columns = df.columns.str.strip()
+
+    if "QP" not in df.columns and "qp" in df.columns:
+        df["QP"] = df["qp"]
+
 
     # Frame ID 표준화
     if "Global_Frame_ID" in df.columns:
@@ -70,6 +77,12 @@ def load_frame_trust_metrics(qp_csv, debug=False):
         raise FileNotFoundError(f"❌ QP CSV not found: {qp_csv}")
 
     df_qp = pd.read_csv(qp_csv)
+    
+    # 추가
+    df_qp.columns = df_qp.columns.str.strip()
+
+    if "QP" not in df_qp.columns and "qp" in df_qp.columns:
+        df_qp["QP"] = df_qp["qp"]
 
     if "Global_Frame_ID" in df_qp.columns:
         df_qp = df_qp.rename(columns={"Global_Frame_ID": "Frame_ID"})

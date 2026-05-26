@@ -25,6 +25,10 @@ from utils.graphics_utils import getWorld2View_np
 
 
 def vis_pose(cameras):
+    cameras = [camera for camera in cameras if camera.R_gt is not None and camera.T_gt is not None]
+    if len(cameras) < 2:
+        return np.zeros((64, 64, 3), dtype=np.uint8)
+
     trj_est_np, trj_gt_np = [], []
     
     for camera in cameras:
@@ -51,6 +55,11 @@ def vis_pose(cameras):
     return img
 
 def eval_pose_metrics(cameras, save_dir):
+    cameras = [camera for camera in cameras if camera.R_gt is not None and camera.T_gt is not None]
+    if len(cameras) < 2:
+        print("Not enough valid GT poses for pose evaluation, skipping")
+        return
+
     trj_est_np, trj_gt_np = [], []
     
     for camera in cameras:

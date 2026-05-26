@@ -1,14 +1,21 @@
 # ============================================
 # 실험 설정
 # ============================================
-SCENES=("forest3" "garden1" "garden2" "garden3")
 
-# SCENES=("forest1" "forest2" "forest3" "garden1" "garden2" "garden3")
-# SCENES=("indoor" "playground" "university1" "university2" "university3" "university4")
-
+# SCENES=("forest1" "forest2" "forest3" "garden1" "garden2" "garden3" "indoor" "playground" "university1" "university2" "university3" "university4")
+SCENES=("forest2" "garden1" "garden2" "university1" "university3" "university4")  
 QP_LEVELS=("qp27")
-COMPRESSED_DATA="/workdir/data/compress-o/hike_half/"
+# QP_LEVELS=("qp27" "qp37" "qp47")
+
+# JM
+# COMPRESSED_DATA="/workdir/data/compress-o/hike_half/"
+# ORIGINAL_DATA="/workdir/data/compress-x/hike_half/"
+
+# VVC
+COMPRESSED_DATA="/workdir/data/compress-o/hike_half_vvc/"
 ORIGINAL_DATA="/workdir/data/compress-x/hike_half/"
+
+
 OUTPUT_BASE=""
 SHEET_NAME="hike"
 
@@ -18,7 +25,7 @@ SHEET_NAME="hike"
 # ============================================
 for SCENE in "${SCENES[@]}"; do
   for QP in "${QP_LEVELS[@]}"; do
-    OUTPUT_BASE="outputs/hike_${QP}_ours"  ##################라벨 수정 필요!!!!!!!!!!!!!!!!!!!!!!!!!!
+    OUTPUT_BASE="outputs/hike_${QP}_ours_t4"  ##################라벨 수정 필요!!!!!!!!!!!!!!!!!!!!!!!!!!
     SCENE_QP="${SCENE}_${QP}_ours" 
     COMP_PATH="${COMPRESSED_DATA}/${QP}/${SCENE}"
     MODEL_PATH="${OUTPUT_BASE}/${SCENE_QP}"

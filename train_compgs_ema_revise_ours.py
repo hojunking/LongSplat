@@ -78,7 +78,13 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
 
     scene_name = getattr(args, "scene_name", "None")
     qp_level = getattr(args, "qp_level", "None")
-    trust_csv_path = f"/workdir/comp_log/{scene_name}_{qp_level}_trustmap.csv"
+    #trust_csv_path = f"/workdir/comp_log/{scene_name}_{qp_level}_trustmap.csv"
+    trust_csv_dir = getattr(args, "trust_csv_dir", "none")
+    trust_csv_path = os.path.join(
+        trust_csv_dir,
+        f"{scene_name}_{qp_level}_trustmap.csv"
+    )
+    
     print('📍[DEBUG] trust_csv_path:', trust_csv_path)
     print('📍[DEBUG] trust_csv_path:', trust_csv_path)
 
@@ -1096,7 +1102,13 @@ if __name__ == "__main__":
     parser.add_argument("--trust_momentum", type=float, default=0.98,
                         help="EMA momentum for trust baseline update (default: 0.98)")
 
-
+    # 추가 1)
+    parser.add_argument(
+        "--trust_csv_dir",
+        type=str,
+        default="/workdir/comp_log/tnt/h265",
+        help="directory containing trustmap csv files"
+    )
 
     args = parser.parse_args(sys.argv[1:])
 

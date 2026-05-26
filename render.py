@@ -254,8 +254,9 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         np.save(os.path.join(depth_path, view.image_name + '.npy'), rendering['depth'][0].detach().cpu().numpy())
         cv2.imwrite(os.path.join(depth_path, '{0:05d}'.format(idx) + ".png"), depth_map)
 
-        if view.T_gt is not None and idx > 1:
-            pose_img = vis_pose(views[0:idx+1])
+        valid_pose_views = [v for v in views[0:idx+1] if v.R_gt is not None and v.T_gt is not None]
+        if len(valid_pose_views) > 1 and idx > 1:
+            pose_img = vis_pose(valid_pose_views)
             pose_img = cv2.cvtColor(pose_img, cv2.COLOR_RGB2BGR)
             pose_imgs_list.append(pose_img)
         
@@ -269,12 +270,14 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         depth_map = cv2.cvtColor(depth_map, cv2.COLOR_RGB2BGR)
         render_depth_list.append(depth_map)
     
-    # Only evaluate pose metrics if GT poses are available
-    has_gt_poses = any(view.T_gt is not None for view in views)
-    if has_gt_poses:
-        eval_pose_metrics(views, poses_path)
+    valid_gt_views = [view for view in views if view.R_gt is not None and view.T_gt is not None]
+    if len(valid_gt_views) > 1:
+        try:
+            eval_pose_metrics(valid_gt_views, poses_path)
+        except Exception as e:
+            print(f"Pose metrics evaluation failed, skipping. Reason: {e}")
     else:
-        print("No GT poses available, skipping pose metrics evaluation")
+        print("Not enough valid GT poses, skipping pose metrics evaluation")
 
 
 

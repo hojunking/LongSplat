@@ -1375,7 +1375,7 @@ class GaussianModel:
 
 
 
-    def adjust_anchor_scale_pruning(
+    def adjust_anchor_scale_pruning_adaptive(
         self,
         check_interval=100,
         success_threshold=0.8,
@@ -1391,18 +1391,13 @@ class GaussianModel:
 
     ):
         # =========================================================
-        # 🔹 1. grad_threshold 동적 조정 (비선형 역비례식)
-        # =========================================================
-        # 3) case 3: EMA 기반
-        # 현재 신뢰도 합 -> 현재 프레임이 얼마나 trust할만한지 반영
         trust_sum = bit_trust + frame_trust
 
-        # === 초기화 (첫 프레임에서 baseline_init 사용) ===
         if not self.trust_initialized:
             if baseline_init is not None:
-                self.trust_baseline = baseline_init  # 🌟 수정: 전달받은 값 사용
+                self.trust_baseline = baseline_init 
             else:
-                self.trust_baseline = trust_sum  # 🌟 fallback: 현재 값 사용
+                self.trust_baseline = trust_sum 
             self.trust_initialized = True
             print(f"[Init] trust_baseline initialized to {self.trust_baseline:.4f}")
 
@@ -1442,7 +1437,7 @@ class GaussianModel:
         grads_norm = torch.norm(grads, dim=-1)
         offset_mask = (self.offset_denom > check_interval * success_threshold * 0.5).squeeze(dim=1)
 
-        self.anchor_growing(grads_norm, grad_threshold, offset_mask)  ### 🌟 grad_threshold → dynamic_grad_threshold
+        self.anchor_growing(grads_norm, dynamic_grad_threshold, offset_mask)  
 
         # =========================================================
         # 이후 부분: 원본 코드 동일
@@ -1460,7 +1455,10 @@ class GaussianModel:
             dtype=torch.int32, device=self.offset_gradient_accum.device
         )
         self.offset_gradient_accum = torch.cat([self.offset_gradient_accum, padding_offset_gradient_accum], dim=0)
+        
 
+
+        ##### Scale-based pruning #####
         if require_purning:
 
             # ---- 1) opacity 기준 1차 pruning ----
@@ -1485,7 +1483,7 @@ class GaussianModel:
             else:
                 scales_anchor = scales
 
-            ##### Scale-pruning #####
+            ##### Scale-based pruning #####
 
             U = torch.norm(scales_anchor, dim=1)
             U_median = torch.median(U)
@@ -1559,67 +1557,84 @@ class GaussianModel:
 
 
 
-    def adjust_anchor_heejung_song(
+    def adjust_anchor_scale_pruning(
         self,
         check_interval=100,
         success_threshold=0.8,
         grad_threshold=0.0002,
         min_opacity=0.005,
         require_purning=True,
-        frame_trust=1.0,   ### 🌟 추가됨
-        bit_trust=0.0,     ### 🌟 추가됨
-        debug=False,        ### 🌟 추가됨
-        mu=0.3, ### 🌟 추가됨
+        frame_trust=1.0,
+        bit_trust=0.0,
+        debug=False,
+        mu=0.3,
+        momentum=0.98,
+        baseline_init=None,
     ):
         # =========================================================
-        # 🔹 1. grad_threshold 동적 조정 (비선형 역비례식)
+        # 1. trust baseline 업데이트: scale-based pruning용
         # =========================================================
-        # 1) case 1
-        # dynamic_grad_threshold = grad_threshold / (1.0 + bit_trust + frame_trust)   ### 🌟 추가됨
-        # dynamic_grad_threshold = max(dynamic_grad_threshold, grad_threshold * 0.3)  ### 🌟 추가됨
+        trust_sum = bit_trust + frame_trust
 
-        # 2) case 2
-        dynamic_grad_threshold = grad_threshold * math.exp(0.4 - (bit_trust + frame_trust))
-        # dynamic_grad_threshold = np.clip(dynamic_grad_threshold, grad_threshold * 0.3, grad_threshold * 1.0)
-        
-        if debug:  ### 🌟 추가됨
-            print(f"[Adjust Anchor] bit={bit_trust:.3f}, frame={frame_trust:.3f} "
-                f"→ grad_th {grad_threshold:.5f} → {dynamic_grad_threshold:.5f}")
+        if not self.trust_initialized:
+            if baseline_init is not None:
+                self.trust_baseline = baseline_init
+            else:
+                self.trust_baseline = trust_sum
+            self.trust_initialized = True
+            if debug:
+                print(f"[Init] trust_baseline initialized to {self.trust_baseline:.4f}")
+
+        self.trust_momentum = momentum
+
+        self.trust_baseline = (
+            self.trust_momentum * self.trust_baseline
+            + (1 - self.trust_momentum) * trust_sum
+        )
+
+        if debug:
+            print(
+                f"[ScalePruneOnly EMA] trust_sum={trust_sum:.3f}, "
+                f"momentum={self.trust_momentum:.3f}, "
+                f"baseline={self.trust_baseline:.3f}"
+            )
 
         # =========================================================
-        # 기존 anchor_growing 로직 (grad_threshold만 수정)
+        # 2. LongSplat 원본 densification 그대로 사용
         # =========================================================
         grads = self.offset_gradient_accum / self.offset_denom
         grads[grads.isnan()] = 0.0
         grads_norm = torch.norm(grads, dim=-1)
         offset_mask = (self.offset_denom > check_interval * success_threshold * 0.5).squeeze(dim=1)
 
-        self.anchor_growing(grads_norm, dynamic_grad_threshold, offset_mask)  ### 🌟 grad_threshold → dynamic_grad_threshold
+        # 중요: 모듈 b가 아니므로 dynamic_grad_threshold 사용하지 않음
+        self.anchor_growing(grads_norm, grad_threshold, offset_mask)
 
-        # =========================================================
-        # 이후 부분: 원본 코드 동일
-        # =========================================================
+        # update offset_denom
         self.offset_denom[offset_mask] = 0
         padding_offset_denom = torch.zeros(
             [self.get_anchor.shape[0] * self.n_offsets - self.offset_denom.shape[0], 1],
-            dtype=torch.int32, device=self.offset_denom.device
+            dtype=torch.int32,
+            device=self.offset_denom.device
         )
         self.offset_denom = torch.cat([self.offset_denom, padding_offset_denom], dim=0)
 
         self.offset_gradient_accum[offset_mask] = 0
         padding_offset_gradient_accum = torch.zeros(
             [self.get_anchor.shape[0] * self.n_offsets - self.offset_gradient_accum.shape[0], 1],
-            dtype=torch.int32, device=self.offset_gradient_accum.device
+            dtype=torch.int32,
+            device=self.offset_gradient_accum.device
         )
         self.offset_gradient_accum = torch.cat([self.offset_gradient_accum, padding_offset_gradient_accum], dim=0)
 
+        # =========================================================
+        # 3. 모듈 a: scale-based pruning만 적용
+        # =========================================================
         if require_purning:
-            # ---- 1) opacity 기준 1차 pruning ----
             prune_mask_opacity = (self.opacity_accum < min_opacity * self.anchor_demon).squeeze(dim=1)
             anchors_mask = (self.anchor_demon > check_interval * success_threshold).squeeze(dim=1)
             prune_mask_opacity = torch.logical_and(prune_mask_opacity, anchors_mask)
 
-            # ---- 2) scale 기반 보정 ----
             scales = torch.exp(self._scaling[:, :3])
             num_anchors = self.get_anchor.shape[0]
             expected_len = num_anchors * self.n_offsets
@@ -1640,37 +1655,24 @@ class GaussianModel:
             U_median = torch.median(U)
             U_tilde = U / (U_median + 1e-8)
 
-            lambda_s = mu
-            scale_weight = torch.exp(-lambda_s * U_tilde)
-            importance = self.opacity_accum.squeeze() * scale_weight
+            scale_weight = torch.exp(self.trust_baseline * U_tilde).unsqueeze(1)
 
-            prune_mask_scale = (importance < min_opacity * self.anchor_demon.squeeze())
-            prune_mask_scale = torch.logical_and(prune_mask_scale, anchors_mask)
+            prune_mask_scale = (
+                self.opacity_accum < min_opacity * scale_weight * self.anchor_demon
+            ).squeeze(dim=1)
 
-            # ---- 3) 최종 마스크 (scale 보정 포함) ----
-            prune_mask_final = prune_mask_scale
+            prune_mask = torch.logical_and(prune_mask_scale, anchors_mask)
 
-            # ✅ LOGGING
-            total_anchors = num_anchors
-            pruned_opacity = int(prune_mask_opacity.sum().item())
-            pruned_scale = int(prune_mask_scale.sum().item())
-            additional_scale = pruned_scale - pruned_opacity if pruned_scale > pruned_opacity else 0
-            kept = total_anchors - pruned_scale
+            if debug:
+                print(
+                    f"[ScalePruneOnly] total={num_anchors} | "
+                    f"opacity_pruned={int(prune_mask_opacity.sum().item())} | "
+                    f"scale_pruned={int(prune_mask.sum().item())} | "
+                    f"trust_baseline={self.trust_baseline:.4f} | "
+                    f"mean_scale={float(scales_anchor.mean().item()):.6f} | "
+                    f"median_U={float(U_median.item()):.6f}"
+                )
 
-            # mean_scale = float(scales_anchor.mean().item())
-            # median_scale = float(U_median.item())
-            # mean_importance = float(importance.mean().item())
-
-            # print(
-            #     f"[ScalePrune] total={total_anchors} | "
-            #     f"opacity_pruned={pruned_opacity} | "
-            #     f"scale_pruned={pruned_scale} (+{additional_scale}) | "
-            #     f"kept={kept}"
-            # )
-
-            # ---- 4) pruning 실제 적용 ----
-            prune_mask = prune_mask_final
-        
             offset_denom = self.offset_denom.view([-1, self.n_offsets])[~prune_mask]
             offset_denom = offset_denom.view([-1, 1])
             del self.offset_denom
@@ -1680,7 +1682,7 @@ class GaussianModel:
             offset_gradient_accum = offset_gradient_accum.view([-1, 1])
             del self.offset_gradient_accum
             self.offset_gradient_accum = offset_gradient_accum
-            
+
             if anchors_mask.sum() > 0:
                 self.opacity_accum[anchors_mask] = torch.zeros([anchors_mask.sum(), 1], device='cuda').float()
                 self.anchor_demon[anchors_mask] = torch.zeros([anchors_mask.sum(), 1], device='cuda').float()
@@ -1697,10 +1699,6 @@ class GaussianModel:
                 self.prune_anchor(prune_mask)
 
         self.max_radii2D = torch.zeros((self.get_anchor.shape[0]), device="cuda")
-
-        if debug:  ### 🌟 추가됨
-            print(f"[Adjust Anchor Done] Grad_Th={dynamic_grad_threshold:.6f}")
-
 
 
 
@@ -2026,12 +2024,6 @@ class GaussianModel:
 
 
 
-
-
-
-
-
-
     def adjust_anchor_ema_qponly(
         self,
         check_interval=100,
@@ -2220,13 +2212,6 @@ class GaussianModel:
             print(f"[Adjust Anchor Done] Grad_Th={dynamic_grad_threshold:.6f}")
 
 
-
-#################################################
-
-
-
-
-#################################################
 
 
     def adjust_anchor_ema_bitonly(

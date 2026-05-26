@@ -1,3 +1,4 @@
+# train_compgs_ema_revise 수정해서 ablation 으로 사용
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # NVIDIA CORPORATION and its licensors retain all intellectual property
@@ -36,7 +37,6 @@ from utils.mast3r_utils import Mast3rMatcher
 import cv2
 from scipy.optimize import least_squares
 from torch.optim.lr_scheduler import ExponentialLR
-import time
 
 # 추가) compression-aware utils 
 from utils.compression_aware_utils import load_frame_trust_metrics, compute_bit_based_trust
@@ -51,7 +51,7 @@ except ImportError:
     TENSORBOARD_FOUND = False
     print("not found tf board")
 
-try:
+try: 
     from fused_ssim import fused_ssim
     FUSED_SSIM_AVAILABLE = True
 except:
@@ -71,6 +71,7 @@ def reprojection_error(params, points_3d, points_2d, K):
 
 
 def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
+    ### trust csv 파일용 수정 내용 ###
     tb_writer = prepare_output_and_logger(dataset)
 
     gaussians = GaussianModel(dataset.feat_dim, dataset.n_offsets, dataset.voxel_size, dataset.update_depth, dataset.update_init_factor, dataset.update_hierachy_factor, dataset.use_feat_bank, 
@@ -79,30 +80,57 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
 
     scene_name = getattr(args, "scene_name", "None")
     qp_level = getattr(args, "qp_level", "None")
-    trust_csv_path = f"/workdir/comp_log/{scene_name}_{qp_level}_trustmap.csv"
+    # trust_csv_path = f"/workdir/comp_log/{scene_name}_{qp_level}_trustmap.csv"
+    trust_csv_dir = getattr(args, "trust_csv_dir", "/workdir/comp_log/free/h265")
+
+    trust_csv_path = os.path.join(
+        trust_csv_dir,
+        f"{scene_name}_{qp_level}_trustmap.csv"
+    )
+
     print('[DEBUG] trust_csv_path:', trust_csv_path)
 
-    try:
-        bit_trust_dict, avg_bit_trust = compute_bit_based_trust(
-            qp_csv=trust_csv_path,
-            max_value=0.5,
-            debug=False
-        )
+    # try:
+    #     bit_trust_dict, avg_bit_trust = compute_bit_based_trust(
+    #         qp_csv=trust_csv_path,
+    #         max_value=0.5,
+    #         debug=False
+    #     )
 
-        frame_trust_dict, avg_importance = load_frame_trust_metrics(
-            qp_csv=trust_csv_path,
-            debug=False
-        )
-        logger.info(f"[Compression-Aware] Frame trust loaded (Type+Bits): {len(frame_trust_dict)} frames ({scene_name}, {qp_level})")
-    except Exception as e:
-        logger.warning(f"Frame trust not available ({scene_name}, {qp_level}) → default=1.0 ({e})")
-        frame_trust_dict = {}
+    #     frame_trust_dict, avg_importance = load_frame_trust_metrics(
+    #         qp_csv=trust_csv_path,
+    #         debug=False
+    #     )
+    #     logger.info(f"[Compression-Aware] Frame trust loaded (Type+Bits): {len(frame_trust_dict)} frames ({scene_name}, {qp_level})")
+    # except Exception as e:
+    #     logger.warning(f"Frame trust not available ({scene_name}, {qp_level}) → default=1.0 ({e})")
+    #     frame_trust_dict = {}
+    
+    if not os.path.exists(trust_csv_path):
+        logger.error(f"[FATAL] QP CSV not found: {trust_csv_path}")
+        raise FileNotFoundError(f"QP CSV not found: {trust_csv_path}")
+
+    bit_trust_dict, avg_bit_trust = compute_bit_based_trust(
+        qp_csv=trust_csv_path,
+        max_value=0.5,
+        debug=False
+    )
+
+    frame_trust_dict, avg_importance = load_frame_trust_metrics(
+        qp_csv=trust_csv_path,
+        debug=False
+    )
+
+    logger.info(
+        f"[Compression-Aware] Frame trust loaded (Type+Bits): "
+        f"{len(frame_trust_dict)} frames ({scene_name}, {qp_level})"
+    )
+
+    ### trust csv 파일용 수정 내용 ~ 끝 ~ ###
 
     num_views = len(scene.getTrainCameras())
     start_view_id = 0
     end_view_id = 1
-    num_frames = 0
-    start_time = time.time()
 
     init_iteraion = opt.init_iteraion
     pose_iteration = opt.pose_iteration
@@ -144,7 +172,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
         
         voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe,background)
         render_pkg = render(viewpoint_cam, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=True)
-        num_frames += 1
         
         image, viewspace_point_tensor, visibility_filter, offset_selection_mask, radii, scaling, opacity = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["selection_mask"], render_pkg["radii"], render_pkg["scaling"], render_pkg["neural_opacity"]
         rendered_depth = render_pkg["depth"][0]
@@ -201,7 +228,7 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 # densification
                 
                 if iteration > opt.update_from and iteration % opt.update_interval == 0:
-                    # initialization -> adjust_anchor_song 적용
+                    # initialization -> adjust_anchor 적용
                     gaussians.adjust_anchor(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity, require_purning = True)
 
             
@@ -293,7 +320,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
 
                 voxel_visible_mask = prefilter_voxel(pre_viewpoint_cam1, gaussians, pipe,background)
                 pre_render_pkg = render(pre_viewpoint_cam1, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=False)
-                num_frames += 1
                 pre_rendered_depth = pre_render_pkg["depth"][0]
 
                 intrinsic_np = viewpoint_cam.intrinsic.detach().cpu().numpy()
@@ -377,7 +403,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             for iteration in range(pose_iteration):
                 voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe, background)
                 render_pkg = render(viewpoint_cam, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=True)
-                num_frames += 1
                 image = render_pkg["render"]
                 rendered_depth = render_pkg["depth"][0]
                 occ_mask = get_occlusion_mask(viewpoint_cam=pre_viewpoint_cam1, viewpoint_cam2=viewpoint_cam, depth=pre_rendered_depth, device=pre_rendered_depth.device, thresh=0.001).detach()
@@ -441,7 +466,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe, background)
             retain_grad = (iteration < opt.update_until and iteration >= 0)
             render_pkg = render(viewpoint_cam, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=retain_grad)
-            num_frames += 1
             
             image, viewspace_point_tensor, visibility_filter, offset_selection_mask, radii, scaling, opacity = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["selection_mask"], render_pkg["radii"], render_pkg["scaling"], render_pkg["neural_opacity"]
             rendered_depth = render_pkg["depth"][0]
@@ -455,7 +479,8 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 ssim_loss = (1 - ssim(image, gt_image))
 
 
-            # dropout rate 적용
+            # 모듈 3
+            # dropout rate 적용 ################# 
             drop_rate = get_dropout_rate_simple(viewpoint_cam, opt.d_mu, verbose=False)
 
             if drop_rate > 0:
@@ -464,6 +489,8 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 Ll1 = (Ll1 * drop_mask).mean()
                 drop_mask_ssim = (torch.rand_like(ssim_loss) > drop_rate).float()
                 ssim_loss = (ssim_loss * drop_mask_ssim).mean()
+            #######################################
+
 
             scaling_reg = scaling.prod(dim=1).mean()
             loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01*scaling_reg
@@ -603,7 +630,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe,background)
             retain_grad = (iteration < opt.update_until and iteration >= 0)
             render_pkg = render(viewpoint_cam, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=retain_grad)
-            num_frames += 1
             
             image, viewspace_point_tensor, visibility_filter, offset_selection_mask, radii, scaling, opacity = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["selection_mask"], render_pkg["radii"], render_pkg["scaling"], render_pkg["neural_opacity"]
             rendered_depth = render_pkg["depth"][0]
@@ -677,24 +703,9 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
 
                         baseline_init = avg_bit_trust + avg_importance
                         print('baseline_init: ', baseline_init)
+        
+                        gaussians.adjust_anchor(check_interval=opt.update_interval, success_threshold=opt.success_threshold, grad_threshold=opt.densify_grad_threshold, min_opacity=opt.min_opacity)
 
-
-                        # global optimization이기 때문에 adjust_anchor_ema_revise 사용
-                        gaussians.adjust_anchor_ema_revise(
-                            check_interval=opt.update_interval,
-                            success_threshold=opt.success_threshold,
-                            grad_threshold=opt.densify_grad_threshold,
-                            min_opacity=opt.min_opacity,
-                            require_purning=True,
-                            frame_trust=frame_trust,   # 🌟 추가됨
-                            bit_trust=bit_trust,       # 🌟 추가됨
-                            debug=True,                 # 🌟 디버깅용 (False면 조용히 동작)
-                            mu=opt.s_mu,                 # 🌟 추가
-                            momentum=args.trust_momentum,   # 🌟 추가
-                            baseline_init=baseline_init,  # 🌟 추가
-
-                        )
-                
 
                         import csv
                         import numpy as np
@@ -762,7 +773,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 end_visible_mask = prefilter_voxel(end_viewpoint_cam, gaussians, pipe, background)
                 render_pkg = render(end_viewpoint_cam, gaussians, pipe, background,
                                     visible_mask=end_visible_mask, retain_grad=False)
-                num_frames += 1
                 offset_selection_mask = render_pkg["selection_mask"]
                 end_n_touched = (render_pkg["n_touched"] > 0)
                 
@@ -781,7 +791,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                     start_visible_mask = prefilter_voxel(start_viewpoint_cam, gaussians, pipe, background)
                     render_pkg = render(start_viewpoint_cam, gaussians, pipe, background,
                                         visible_mask=start_visible_mask, retain_grad=False)
-                    num_frames += 1
                     offset_selection_mask = render_pkg["selection_mask"]
                     start_n_touched = (render_pkg["n_touched"] > 0)
                     
@@ -817,7 +826,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
             for view in scene.getTrainCameras()[0:end_view_id]:
                 voxel_visible_mask = prefilter_voxel(view, gaussians, pipe, background)
                 render_pkg = render(view, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=False)
-                num_frames += 1
                 n_touched = render_pkg["n_touched"]
                 offset_selection_mask = render_pkg["selection_mask"]
                 visible_mask_expand = voxel_visible_mask.unsqueeze(0).expand(gaussians.n_offsets, -1).reshape(-1)
@@ -874,7 +882,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
         voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe,background)
         retain_grad = (iteration < opt.update_until and iteration >= 0)
         render_pkg = render(viewpoint_cam, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=retain_grad)
-        num_frames += 1
         
         image, viewspace_point_tensor, visibility_filter, offset_selection_mask, radii, scaling, opacity = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["selection_mask"], render_pkg["radii"], render_pkg["scaling"], render_pkg["neural_opacity"]
         rendered_depth = render_pkg["depth"][0]
@@ -993,11 +1000,6 @@ def training(dataset, opt, pipe, dataset_name, debug_from, logger=None):
                 update_pose(viewpoint_cam)
 
 
-    elapsed = time.time() - start_time
-    fps = num_frames / elapsed if elapsed > 0 else 0.0
-    logger.info(f"[TRAIN STATS] total_time={elapsed:.2f}s, frames={num_frames}, FPS={fps:.2f}")
-    print(f"[TRAIN STATS] total_time={elapsed:.2f}s, frames={num_frames}, FPS={fps:.2f}")
-
     logger.info("\n[ITER {}] Saving Gaussians".format(iteration))
     scene.save(iteration)
     save_transforms(scene.getTrainCameras().copy(), os.path.join(scene.model_path, "cameras_all_train.json"))
@@ -1098,10 +1100,10 @@ if __name__ == "__main__":
     parser.add_argument("--gpu", type=str, default = '-1')
 
 
-    parser.add_argument("--scene_name", type=str, help="scene name, e.g., grass/hydrant/lab/road")
-    parser.add_argument("--qp_level", type=str, help="QP level, e.g., qp32/qp37")
+    parser.add_argument("--scene_name", type=str, default="grass", help="scene name, e.g., grass/hydrant/lab/road")
+    parser.add_argument("--qp_level", type=str, default="qp37", help="QP level, e.g., qp32/qp37")
 
-    parser.add_argument("--trust_momentum", type=float, default=0.95,
+    parser.add_argument("--trust_momentum", type=float, default=0.98,
                         help="EMA momentum for trust baseline update (default: 0.98)")
 
     # 추가 1)
@@ -1111,6 +1113,7 @@ if __name__ == "__main__":
         default="/workdir/comp_log/free/h265",
         help="directory containing trustmap csv files"
     )
+
 
     args = parser.parse_args(sys.argv[1:])
 

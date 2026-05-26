@@ -1,39 +1,42 @@
 #!/bin/bash
 # ============================================
-# 실험 설정
+# 모듈 ablation 실험 진행 (2026-05-21)
 # ============================================
+SCENES=("grass" "hydrant" "lab" "pillar" "road" "sky" "stair")
 
-SCENES=("Church" "Barn" "Family" "Museum" "Horse" "Ballroom" "Francis" "Ignatius")
+QP_LEVELS=("qp37")  # QP37 먼저, QP32 나중
+COMPRESSED_DATA="/workdir/data/compress-o/free/h265"
+ORIGINAL_DATA="/workdir/data/compress-x/free"
+OUTPUT_BASE="outputs_ablation/"
+SHEET_NAME="PC2"
 
-QP_LEVELS=("qp27" "qp47")  # QP37 먼저, QP32 나중
-COMPRESSED_DATA="/workdir/data/compress-o/tnt/h264"
-ORIGINAL_DATA="/workdir/data/compress-x/tnt"
-OUTPUT_BASE="outputs/tnt_qp27_47_ours"
-SHEET_NAME="rebuttal"
-
-TRUST_CSV_BASE="/workdir/comp_log/tnt/h264"  # trustmap csv 파일이 저장된 기본 경로
+# 추가 1)
+TRUST_CSV_BASE="/workdir/comp_log/free/h265"
 
 # ============================================
 # 루프 시작
 # ============================================
 for SCENE in "${SCENES[@]}"; do
   for QP in "${QP_LEVELS[@]}"; do
-    SCENE_QP="${SCENE}_${QP}_ours"
+    # SCENE_QP="${SCENE}_${QP}_free_module3" #### 바꾸기
+    SCENE_QP="${SCENE}_${QP}_free_module2" 
+
     COMP_PATH="${COMPRESSED_DATA}/${QP}/${SCENE}"
     MODEL_PATH="${OUTPUT_BASE}/${SCENE_QP}"
 
     echo "=========================================="
-    echo "📂 Processing: ${SCENE_QP}"
+    echo "Processing: ${SCENE_QP}"
     echo "=========================================="
-    
-    #TRUST_CSV_BASE_DIR="${TRUST_CSV_BASE}/${QP}"  # trustmap csv 파일이 저장된 기본 경로
-    # 1️⃣ Training 
+
+    # 1. Training
     echo ""
-    echo "🔵 [1/3] Training with ${QP} images..."
-    python train_compgs_ema_revise_ours.py --eval \
+    echo "[1/3] Training with ${QP} images..."
+    # python train_compgs_ema_ablation1.py --eval \
+
+    python train_compgs_ema_ablation2.py --eval \
         -s ${COMP_PATH} \
         -m ${MODEL_PATH} \
-        --mode free \
+        -r 2 --mode free \
         --d_mu 0.5  \
         --port $((12345 + RANDOM % 1000)) \
         --scene_name ${SCENE} \
@@ -41,41 +44,41 @@ for SCENE in "${SCENES[@]}"; do
         --trust_csv_dir ${TRUST_CSV_BASE} \
         --trust_momentum 0.95
 
-    [ $? -ne 0 ] && echo "❌ Training failed for ${SCENE_QP}, skipping..." && continue
+    [ $? -ne 0 ] && echo "Training failed for ${SCENE_QP}, skipping..." && continue
 
-    # 2️⃣ Rendering
+    # 2. Rendering
     echo ""
-    echo "🟢 [2/3] Rendering ${SCENE_QP}..."
+    echo "[2/3] Rendering ${SCENE_QP}..."
     python render.py \
         -m ${MODEL_PATH} \
         --original_images_path ${ORIGINAL_DATA}/${SCENE}/images
 
-    [ $? -ne 0 ] && echo "❌ Rendering failed for ${SCENE_QP}, skipping..." && continue
+    [ $? -ne 0 ] && echo "Rendering failed for ${SCENE_QP}, skipping..." && continue
 
-    # 3️⃣ Metrics
+    # 3. Metrics
     echo ""
-    echo "🟣 [3/3] Evaluating metrics for ${SCENE_QP}..."
+    echo "[3/3] Evaluating metrics for ${SCENE_QP}..."
     python metrics.py -m ${MODEL_PATH}
 
-    [ $? -ne 0 ] && echo "❌ Metrics failed for ${SCENE_QP}, skipping..." && continue
+    [ $? -ne 0 ] && echo "Metrics failed for ${SCENE_QP}, skipping..." && continue
 
-    # 4️⃣ GSpread 업로드 (결과 시트 자동 업로드)
+    # 4. GSpread 업로드 (결과 시트 자동 업로드)
     JSON_PATH="${MODEL_PATH}/results.json"
     POSE_PATH="${MODEL_PATH}/test/ours_40000/poses/pose_eval.txt"
 
     if [ -f "$JSON_PATH" ]; then
-      echo "📤 Uploading ${SCENE_QP} results to GSpread (${SHEET_NAME})..."
+      echo "Uploading ${SCENE_QP} results to GSpread (${SHEET_NAME})..."
       python gspread/gspread-results.py \
           "${JSON_PATH}" \
           "${POSE_PATH}" \
           "${MODEL_PATH}" \
           "${SHEET_NAME}"
     else
-      echo "⚠️ No results.json found for ${SCENE_QP}, skipping upload."
+      echo "No results.json found for ${SCENE_QP}, skipping upload."
     fi
 
     echo ""
-    echo "✅ Finished ${SCENE_QP}"
+    echo "Finished ${SCENE_QP}"
     echo "------------------------------------------"
   done
 done
@@ -87,4 +90,4 @@ done
 
 # python render.py  -m ./outputs/free/grass_qp37_imp1/ --original_images_path ./data/compress-x/free/grass/images 
 
-# python metrics.py -m ./outputs/free/grass_qp37_imp1/ 
+# python metrics.py -m ./outputs/free/grass_qp37_imp1/
